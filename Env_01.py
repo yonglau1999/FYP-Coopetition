@@ -14,14 +14,17 @@ from stable_baselines3.common.env_checker import check_env
 from stable_baselines3.common.evaluation import evaluate_policy
 
 from tianshou.env import PettingZooEnv
-from tianshou.data import Collector, ReplayBuffer
-from tianshou.policy import PPOPolicy, MultiAgentPolicyManager
+from tianshou.data import Collector, VectorReplayBuffer
+from tianshou.policy import BasePolicy, DQNPolicy, MultiAgentPolicyManager, RandomPolicy
+from tianshou.trainer import OffpolicyTrainer
+from tianshou.utils.net.common import Net
 from tianshou.utils.net.common import ActorCritic
 from tianshou.utils.net.continuous import ActorProb, Critic
+import supersuit as ss
 
 class LogisticsServiceModel:
     def __init__(self, L_s, X, L_e=10, phi=0.05, alpha=0.5, beta=0.7, gamma=0.5, c=0.5, f=1):
-        self.L_e = L_e  # E-tailer's logistics service level
+        self.L_e = L_e  # E-tailer's logistics service level    
         self.L_s = L_s  # Seller's logistics service level
         self.phi = phi  # Commission rate
         self.X = X      # Market potential (from normal distribution)
@@ -80,11 +83,11 @@ class LogisticsServiceModel:
                                  self.L_e * (self.alpha * self.beta - 2 * self.gamma) +
                                  self.L_s * (2 * self.beta - self.alpha * self.gamma)) + self.f * (self.alpha**2 * (1 + self.phi) - 2)
 
-    def p1_no_sharing(self):
-        return self.M1/((1-self.phi)*(4-self.alpha**2*(1+self.phi)))
+    def p1_no_sharing(self,theta):
+        return self.M1(theta)/((1-self.phi)*(4-self.alpha**2*(1+self.phi)))
     
-    def p2_no_sharing(self):
-        return self.M2/((1-self.phi)*(4-self.alpha**2*(1+self.phi)))  
+    def p2_no_sharing(self,theta):
+        return self.M2(theta)/((1-self.phi)*(4-self.alpha**2*(1+self.phi)))  
     
     def p1_sharing(self,theta):
         top = (theta + self.L_e * (self.beta - self. gamma)) * (8 + 2 * self.alpha * (1-self.phi) - 4 * self.phi - self.alpha**2 * (1-self.phi **2)) + \
@@ -100,10 +103,10 @@ class LogisticsServiceModel:
 
 
     def D_seller_sharing(self,theta):
-        return theta - self.p2_sharing +self.alpha * self.p1_sharing + self.beta * self.L_s - self.gamma * self.L_e
+        return theta - self.p2_sharing(theta) +self.alpha * self.p1_sharing(theta) + self.beta * self.L_s - self.gamma * self.L_e
     
     def D_seller_no_sharing(self,theta):
-         return theta - self.p2_no_sharing +self.alpha * self.p1_no_sharing + self.beta * self.L_e - self.gamma * self.L_e       
+         return theta - self.p2_no_sharing(theta) +self.alpha * self.p1_no_sharing(theta) + self.beta * self.L_e - self.gamma * self.L_e       
 
 # Continue with the plotting logic you previously had
 def plot_profit_regions():
@@ -195,16 +198,17 @@ class CoopetitionEnv(AECEnv):
         super().__init__()
         self.agents = ["e_tailer", "seller", "tplp"]
         self.possible_agents = self.agents[:]
-        self.agent_selection = self.possible_agents[0]
+        self.current_agent = 0
+        self.agent_selection = self.possible_agents[self.current_agent]
         
         # State: [market_potential, L_s, f, 0 -noshare, 1- share x 2]
         self.state = np.array([10.0, 0.5, 1, 0, 0], dtype=np.float32)  # Initial state values
 
         # Action spaces
         self.action_spaces = {
-            "e_tailer": spaces.Discrete(2),  # 0: No sharing, 1: Share logistics
-            "seller": spaces.Discrete(2),    # 0: Reject, 1: Accept
-            "tplp": spaces.Box(low=np.array([0.0, 0.0]), high=np.array([10.0, 1.0]), dtype=np.float32)  # Adjust L_s and f respectively
+            "e_tailer": spaces.Box(low=np.array([0.0, 0.0]), high=np.array([10.0, 1.0]), dtype=np.float32),  # Shape (2,), only first dimension matters
+            "seller": spaces.Box(low=np.array([0.0, 0.0]), high=np.array([10.0, 1.0]), dtype=np.float32),    # Shape (2,), only first dimension matters
+            "tplp": spaces.Box(low=np.array([0.0, 0.0]), high=np.array([10.0, 1.0]), dtype=np.float32)  # L_s and f both continuous
         }
 
         # Observation spaces
@@ -213,34 +217,61 @@ class CoopetitionEnv(AECEnv):
             "seller": spaces.Box(low=0, high=np.inf, shape=(5,), dtype=np.float32),
             "tplp": spaces.Box(low=0, high=np.inf, shape=(5,), dtype=np.float32)
         }
-
+        self.terminations = {agent: False for agent in self.agents}
+        self.truncations = {agent: False for agent in self.agents}
+        self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
         self.rewards = {agent: 0.0 for agent in self.agents}
         self.dones = {agent: False for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
         self.model = LogisticsServiceModel(L_s=self.state[1], X=self.state[0])
 
+    def num_agents(self) -> int:
+        return len(self.agents)
+    
+    def max_num_agents(self) -> int:
+        return len(self.possible_agents)
+    
+    def observe(self,agent):
+        """Return the observation for the current agent."""
+        return self.state.copy()
+    
+    def _clear_rewards(self) -> None:
+        """Clears all items in .rewards."""
+        for agent in self.rewards:
+            self.rewards[agent] = 0
+
+    def _accumulate_rewards(self) -> None:
+        """Adds .rewards dictionary to ._cumulative_rewards dictionary.
+
+        Typically called near the end of a step() method
+        """
+        for agent, reward in self.rewards.items():
+            self._cumulative_rewards[agent] += reward
+    
     def reset(self):
         self.state = np.array([10.0, 0.5, 1, 0, 0], dtype=np.float32)
         self.agents = self.possible_agents[:]
         self.agent_selection = self.possible_agents[0]
         self.dones = {agent: False for agent in self.agents}
-        self.rewards = {agent: 0.0 for agent in self.agents}
+        self._clear_rewards()
+        self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
         return {agent: self.state.copy() for agent in self.agents}
 
     def step(self, action):
         agent = self.agent_selection
+        print(f"Current Agent: {agent}")
         
         if agent == "e_tailer":
-            if action == 1:  # E-tailer agrees to share logistics
+            if action[agent][1] == 1:  # E-tailer agrees to share logistics
                 self.state[3] = 1
             else:
                 self.state[3] = 0
             self.current_agent = 1  # Move to seller
-            
+            self.agent_selection = self.possible_agents[self.current_agent]
         # Seller makes decision to accept/reject sharing
         elif agent == "seller":
-            if action == 1:  # Seller accepts logistics sharing
+            if action[agent][1] == 1:  # Seller accepts logistics sharing
                 self.seller_sharing_decision = True
             else:
                 self.seller_sharing_decision = False
@@ -250,17 +281,18 @@ class CoopetitionEnv(AECEnv):
             else:
                 self.state[4] = 0  # No logistics sharing
             self.current_agent = 2  # Move to TPLP
-
+            self.agent_selection = self.possible_agents[self.current_agent]
         # TPLP adjusts service level and price
         elif agent == "tplp":
             # Action determines L_s and f for TPLP
-            self.state[1], self.state[2] = action  # Update L_s and f
+            self.state[1], self.state[2] = action[agent]  # Update L_s and f
             self.current_agent = 0  # Return to E-tailer for next round
-
+            self.agent_selection = self.possible_agents[self.current_agent]
 
         # Calculate rewards based on the profit functions
-        for ag in self.agents:
-            self.rewards[ag] = self.calculate_profit(ag)
+        self.rewards[agent] = self.calculate_profit(agent)
+
+        self._accumulate_rewards()
         
         # Check if the episode is done (define your own termination conditions)
         self.dones = {agent: False for agent in self.agents}  # Modify as needed
@@ -268,12 +300,13 @@ class CoopetitionEnv(AECEnv):
         # Set info dictionary (if needed)
         self.infos = {agent: {} for agent in self.agents}
 
+        return self.observe(agent), self.rewards, False, self.dones, self.infos
+    
     def calculate_profit(self, agent):
         theta = self.state[0]  # Market potential
         L_s = self.state[1]    # Seller's service level
         f = self.state[2]      # Logistics cost
         sharing_status = self.state[4]  # Logistics sharing status
-
         # Reinitialize the model with updated state variables
         self.model.L_s = L_s
         self.model.X = theta
@@ -300,8 +333,7 @@ class CoopetitionEnv(AECEnv):
                 # Use the profit function for TPLP based on the D2 formula
                 c_2 = 0.5  # TPLP's logistics cost
                 D_2 = self.model.D_seller_no_sharing(theta)
-
-            profit = f * D_2 - c_2 * D_2
+                profit = f * D_2 - c_2 * D_2
 
         return profit
 
@@ -312,27 +344,21 @@ class CoopetitionEnv(AECEnv):
     def close(self):
         pass
 
-# Create the environment
-env = PettingZooEnv(CoopetitionEnv())  # CoopetitionEnv is your AEC environment
+env = CoopetitionEnv()
 
-# Define policies for each agent (e.g., PPO, random policy, etc.)
-policy = MultiAgentPolicyManager(
-    [RandomPolicy(env.observation_space, env.action_space),
-     RandomPolicy(env.observation_space, env.action_space),
-     RandomPolicy(env.observation_space, env.action_space)],
-    env
-)
+# env = ss.pad_action_space_v0(env)
+env = PettingZooEnv(CoopetitionEnv())
+obs = env.reset()
+env.render() 
 
-# Create a collector for the environment
-train_collector = Collector(policy, env)
 
-# Start training using Tianshou's trainer (you can use other algorithms like PPO, A2C, etc.)
-result = onpolicy_trainer(
-    policy, train_collector, test_collector=None, max_epoch=10, step_per_epoch=1000, step_per_collect=10
-)
+for i in range(4):
+    action = {"e_tailer": [0,0], "seller": [0, 1], "tplp": [6, 1]}
+    obs, reward, terminated, truncated, info = env.step(action)
 
-print(result)
+# Extract the returned dictionaries
 
+print(obs,reward)
 
 # Run the function to plot the profit regions
-# plot_profit_regions()
+plot_profit_regions()
