@@ -1,0 +1,6 @@
+numpy
+matplotlib
+pettingzoo
+gymnasium
+ray[rllib]
+torch
