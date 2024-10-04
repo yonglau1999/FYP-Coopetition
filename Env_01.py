@@ -5,22 +5,27 @@ import matplotlib.patches as mpatches
 # Creating the environment
 
 from pettingzoo.utils import AECEnv
-from gym import spaces
+from api_test import api_test
+
+from pettingzoo.utils import agent_selector
+
+from gymnasium import spaces
 
 # Reinforcement learning model
 
-from stable_baselines3 import PPO
-from stable_baselines3.common.env_checker import check_env
-from stable_baselines3.common.evaluation import evaluate_policy
+from copy import deepcopy
+from torch.utils.tensorboard import SummaryWriter
+from tianshou.utils import BasicLogger
 
-from tianshou.env import PettingZooEnv
-from tianshou.data import Collector, VectorReplayBuffer
-from tianshou.policy import BasePolicy, DQNPolicy, MultiAgentPolicyManager, RandomPolicy
+from tianshou.env import DummyVectorEnv
+from tianshou.utils.net.common import Net
 from tianshou.trainer import OffpolicyTrainer
+from tianshou.data import Collector, VectorReplayBuffer
+from tianshou.env import PettingZooEnv
+from tianshou.policy import BasePolicy, DQNPolicy, MultiAgentPolicyManager, RandomPolicy
 from tianshou.utils.net.common import Net
 from tianshou.utils.net.common import ActorCritic
 from tianshou.utils.net.continuous import ActorProb, Critic
-import supersuit as ss
 
 class LogisticsServiceModel:
     def __init__(self, L_s, X, L_e=10, phi=0.05, alpha=0.5, beta=0.7, gamma=0.5, c=0.5, f=1):
@@ -197,18 +202,19 @@ class CoopetitionEnv(AECEnv):
         super(CoopetitionEnv, self).__init__()
         super().__init__()
         self.agents = ["e_tailer", "seller", "tplp"]
+        self.selector = agent_selector(self.agents)
         self.possible_agents = self.agents[:]
-        self.current_agent = 0
-        self.agent_selection = self.possible_agents[self.current_agent]
+        # self.current_agent = 0
+        self.agent_selection = self.selector.reset()
         
         # State: [market_potential, L_s, f, 0 -noshare, 1- share x 2]
         self.state = np.array([10.0, 0.5, 1, 0, 0], dtype=np.float32)  # Initial state values
 
         # Action spaces
         self.action_spaces = {
-            "e_tailer": spaces.Box(low=np.array([0.0, 0.0]), high=np.array([10.0, 1.0]), dtype=np.float32),  # Shape (2,), only first dimension matters
-            "seller": spaces.Box(low=np.array([0.0, 0.0]), high=np.array([10.0, 1.0]), dtype=np.float32),    # Shape (2,), only first dimension matters
-            "tplp": spaces.Box(low=np.array([0.0, 0.0]), high=np.array([10.0, 1.0]), dtype=np.float32)  # L_s and f both continuous
+            "e_tailer": spaces.Discrete(2),  # Shape (2,), only first dimension matters
+            "seller": spaces.Discrete(2),    # Shape (2,), only first dimension matters
+            "tplp": spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1]), dtype=np.float32)  # L_s and f both continuous
         }
 
         # Observation spaces
@@ -225,22 +231,23 @@ class CoopetitionEnv(AECEnv):
         self.infos = {agent: {} for agent in self.agents}
         self.model = LogisticsServiceModel(L_s=self.state[1], X=self.state[0])
 
+    @property
     def num_agents(self) -> int:
-        return len(self.agents)
-    
+        return int(len(self.agents))
+    @property
     def max_num_agents(self) -> int:
-        return len(self.possible_agents)
+        return int(len(self.possible_agents))
     
     def observe(self,agent):
         """Return the observation for the current agent."""
         return self.state.copy()
     
-    def _clear_rewards(self) -> None:
+    def _clear_rewards(self):
         """Clears all items in .rewards."""
         for agent in self.rewards:
             self.rewards[agent] = 0
 
-    def _accumulate_rewards(self) -> None:
+    def _accumulate_rewards(self):
         """Adds .rewards dictionary to ._cumulative_rewards dictionary.
 
         Typically called near the end of a step() method
@@ -248,30 +255,30 @@ class CoopetitionEnv(AECEnv):
         for agent, reward in self.rewards.items():
             self._cumulative_rewards[agent] += reward
     
-    def reset(self):
+    def reset(self, seed = None, options = None):
         self.state = np.array([10.0, 0.5, 1, 0, 0], dtype=np.float32)
         self.agents = self.possible_agents[:]
         self.agent_selection = self.possible_agents[0]
         self.dones = {agent: False for agent in self.agents}
-        self._clear_rewards()
         self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
         return {agent: self.state.copy() for agent in self.agents}
 
     def step(self, action):
+        self._clear_rewards()
         agent = self.agent_selection
+        self._cumulative_rewards[agent] = 0
         print(f"Current Agent: {agent}")
         
         if agent == "e_tailer":
-            if action[agent][1] == 1:  # E-tailer agrees to share logistics
+            if action == 1:  # E-tailer agrees to share logistics
                 self.state[3] = 1
             else:
                 self.state[3] = 0
-            self.current_agent = 1  # Move to seller
-            self.agent_selection = self.possible_agents[self.current_agent]
+
         # Seller makes decision to accept/reject sharing
         elif agent == "seller":
-            if action[agent][1] == 1:  # Seller accepts logistics sharing
+            if action == 1:  # Seller accepts logistics sharing
                 self.seller_sharing_decision = True
             else:
                 self.seller_sharing_decision = False
@@ -280,19 +287,18 @@ class CoopetitionEnv(AECEnv):
                 self.state[4] = 1  # Logistics sharing is active
             else:
                 self.state[4] = 0  # No logistics sharing
-            self.current_agent = 2  # Move to TPLP
-            self.agent_selection = self.possible_agents[self.current_agent]
+
         # TPLP adjusts service level and price
         elif agent == "tplp":
             # Action determines L_s and f for TPLP
-            self.state[1], self.state[2] = action[agent]  # Update L_s and f
-            self.current_agent = 0  # Return to E-tailer for next round
-            self.agent_selection = self.possible_agents[self.current_agent]
+            self.state[1], self.state[2] = action  # Update L_s and f
 
         # Calculate rewards based on the profit functions
         self.rewards[agent] = self.calculate_profit(agent)
-
+        
         self._accumulate_rewards()
+
+        print(self._cumulative_rewards)
         
         # Check if the episode is done (define your own termination conditions)
         self.dones = {agent: False for agent in self.agents}  # Modify as needed
@@ -300,7 +306,10 @@ class CoopetitionEnv(AECEnv):
         # Set info dictionary (if needed)
         self.infos = {agent: {} for agent in self.agents}
 
-        return self.observe(agent), self.rewards, False, self.dones, self.infos
+        # self._cumulative_rewards[agent] = 0
+        self.agent_selection = self.selector.next()
+
+        # return self.observe(agent), self._cumulative_rewards, False, self.dones, self.infos
     
     def calculate_profit(self, agent):
         theta = self.state[0]  # Market potential
@@ -327,14 +336,13 @@ class CoopetitionEnv(AECEnv):
 
         elif agent == "tplp":
 
-            if sharing_status == 1:
-                profit = 0
-            else:
+            if sharing_status == 0:
                 # Use the profit function for TPLP based on the D2 formula
                 c_2 = 0.5  # TPLP's logistics cost
                 D_2 = self.model.D_seller_no_sharing(theta)
                 profit = f * D_2 - c_2 * D_2
-
+            else:
+                profit = 0
         return profit
 
 
@@ -344,21 +352,42 @@ class CoopetitionEnv(AECEnv):
     def close(self):
         pass
 
+    def last(
+        self, observe: bool = True):
+        """Returns observation, cumulative reward, terminated, truncated, info for the current agent (specified by self.agent_selection)."""
+        agent = self.agent_selection
+        assert agent is not None
+        observation = self.observe(agent) if observe else None
+        print(f'{agent},{self._cumulative_rewards[agent]}')
+        return (
+            observation,
+            self._cumulative_rewards[agent],
+            self.terminations[agent],
+            self.truncations[agent],
+            self.infos[agent],
+        )
+
 env = CoopetitionEnv()
 
-# env = ss.pad_action_space_v0(env)
-env = PettingZooEnv(CoopetitionEnv())
-obs = env.reset()
-env.render() 
+
+api_test(env,num_cycles = 100)
 
 
-for i in range(4):
-    action = {"e_tailer": [0,0], "seller": [0, 1], "tplp": [6, 1]}
-    obs, reward, terminated, truncated, info = env.step(action)
+# # env = ss.pad_action_space_v0(env)
+# env = PettingZooEnv(CoopetitionEnv())
+# obs = env.reset()
+# env.render() 
+
+
+# for i in range(4):
+#     action = {"e_tailer": [0,0], "seller": [0, 1], "tplp": [6, 1]}
+#     obs, reward, terminated, truncated, info = env.step(action)
 
 # Extract the returned dictionaries
 
-print(obs,reward)
+# print(obs,reward)
 
 # Run the function to plot the profit regions
-plot_profit_regions()
+# plot_profit_regions()
+
+
