@@ -14,8 +14,10 @@ from api_test import api_test
 from ray.tune.registry import register_env
 from ray.rllib.env import PettingZooEnv
 import ray
+from ray import air 
 from ray import tune
 from ray.rllib.algorithms import ppo
+from ray.rllib.policy.policy import PolicySpec
 
 class LogisticsServiceModel:
     def __init__(self, L_s, X, L_e=10, phi=0.05, alpha=0.5, beta=0.7, gamma=0.5, c=0.5, f=1):
@@ -208,9 +210,9 @@ class CoopetitionEnv(AECEnv):
 
         # Observation spaces
         self.observation_spaces = {
-            "e_tailer": spaces.Box(low=np.array([0.0, 0.0]), high=np.array([10.0, 10.0]), dtype=np.float32),  # Market potential and service level
-            "seller": spaces.Discrete(2),  # First decision (logistics sharing decision)
-            "tplp": spaces.Discrete(2)  # Second decision (whether sharing is active)
+            "e_tailer": spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1.0]), dtype=np.float32),  # Market potential and service level
+            "seller": spaces.Box(low=0, high=1,dtype=np.float32),  # First decision (logistics sharing decision)
+            "tplp": spaces.Box(low=0, high=1,dtype=np.float32)  # Second decision (whether sharing is active)
         }
         self.terminations = {agent: False for agent in self.agents}
         self.truncations = {agent: False for agent in self.agents}
@@ -240,7 +242,8 @@ class CoopetitionEnv(AECEnv):
             # TPLP sees only the second decision (whether logistics sharing is active)
             return np.array([self.state[4]], dtype=np.float32)
         else:
-            raise ValueError(f"Unknown agent: {agent}")
+            # Return a dummy observation in case of issues
+            return np.zeros(self.observation_space.shape, dtype=np.float32)
     
     def _clear_rewards(self):
         """Clears all items in .rewards."""
@@ -268,7 +271,7 @@ class CoopetitionEnv(AECEnv):
         self._clear_rewards()
         agent = self.agent_selection
         self._cumulative_rewards[agent] = 0
-        print(f"Current Agent: {agent}")
+        # print(f"Current Agent: {agent}")
         
         if agent == "e_tailer":
             if action == 1:  # E-tailer agrees to share logistics
@@ -278,12 +281,8 @@ class CoopetitionEnv(AECEnv):
 
         # Seller makes decision to accept/reject sharing
         elif agent == "seller":
-            if action == 1:  # Seller accepts logistics sharing
-                self.seller_sharing_decision = True
-            else:
-                self.seller_sharing_decision = False
             # Set logistics sharing status in the state
-            if self.state[3] == 1 and self.seller_sharing_decision:
+            if self.state[3] == 1 and action == 1:
                 self.state[4] = 1  # Logistics sharing is active
             else:
                 self.state[4] = 0  # No logistics sharing
@@ -298,8 +297,6 @@ class CoopetitionEnv(AECEnv):
         self.rewards[agent] = self.calculate_profit(agent)
         
         self._accumulate_rewards()
-
-        print(self._cumulative_rewards)
         
         # Check if the episode is done (define your own termination conditions)
         self.dones = {agent: False for agent in self.agents}  # Modify as needed
@@ -353,48 +350,56 @@ class CoopetitionEnv(AECEnv):
     def close(self):
         pass
 
-env = CoopetitionEnv()
-obs = env.reset()
-done = False
-while not all(env.dones.values()):
-    # Iterate over each agent and take a random action
-    for agent in env.agents:
-        action = env.action_spaces[agent].sample()  # Sample action for each agent
-        env.step(action)
+# env = CoopetitionEnv()
+# obs = env.reset()
+# done = False
+# while not all(env.dones.values()):
+#     # Iterate over each agent and take a random action
+#     for agent in env.agents:
+#         action = env.action_spaces[agent].sample()  # Sample action for each agent
+#         env.step(action)
 
-    print(env.state)  # Or handle the observations and rewards
+#     print(env.state)  # Or handle the observations and rewards
 
 def env_creator(env_config):
-    from Env_01 import CoopetitionEnv  # Import your environment class
-    return PettingZooEnv(CoopetitionEnv())  # Wrap it in PettingZooEnv for RLlib
+    return PettingZooEnv(CoopetitionEnv())
 
-# Register the environment
 register_env("coopetition-v1", env_creator)
 
-config = {
-    "env": "coopetition-v1",  # The environment you just registered
-    "env_config": {},         # Pass additional environment-specific configurations here if needed
-    "framework": "torch",     # Use PyTorch for RLlib
+# Define the config with multi-agent setup
 
-    # Multi-agent setup
-    "multiagent": {
-        "policies": {
-            "e_tailer_policy": (None, spaces.Box(low=0, high=10, shape=(5,)), spaces.Discrete(2), {}),
-            "seller_policy": (None, spaces.Box(low=0, high=10, shape=(5,)), spaces.Discrete(2), {}),
-            "tplp_policy": (None, spaces.Box(low=0, high=10, shape=(5,)), spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1]), dtype=np.float32), {})
+config = (
+    ppo.PPOConfig()
+    .api_stack(
+        enable_rl_module_and_learner=True,
+        enable_env_runner_and_connector_v2=True,
+    )
+    .environment(env="coopetition-v1")
+    .multi_agent(
+        policies={
+            "e_tailer_policy": PolicySpec(
+                observation_space=spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1], dtype=np.float32)),
+                action_space=spaces.Discrete(2),
+            ),
+            "seller_policy": PolicySpec(
+                observation_space=spaces.Box(low=0, high=1,dtype=np.float32),
+                action_space=spaces.Discrete(2),
+            ),
+            "tplp_policy": PolicySpec(
+                observation_space=spaces.Box(low=0, high=1,dtype=np.float32),
+                action_space=spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1])),
+            ),
         },
-        "policy_mapping_fn": (lambda agent_id: "e_tailer_policy" if agent_id == "e_tailer" 
-                              else "seller_policy" if agent_id == "seller" 
-                              else "tplp_policy")
-    },
-    "num_workers": 0,          # Number of parallel workers
-    "num_gpus": 1,             # If you want to use GPUs, set this to > 
-    "evaluation_interval": None,  # Disable evaluation during training
-}
+        policy_mapping_fn=lambda agent_id, *args, **kwargs: agent_id + "_policy",
+    )
+    .training(
+        lr=0.001,
+        clip_param=0.2,
+    )
+)
 
-# Run PPO Algorithm with the above configuration
-# tune.run(
-#     ppo.PPO,
-#     config=config,
-#     stop={"episodes_total": 10},  # Adjust stopping condition as needed
-# )
+tune.Tuner(
+    "PPO",
+    run_config=air.RunConfig(stop={"training_iteration": 5}),
+    param_space=config,
+).fit()
