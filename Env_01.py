@@ -6,18 +6,22 @@ import matplotlib.patches as mpatches
 
 from pettingzoo.utils import AECEnv
 from pettingzoo.utils import agent_selector
-from gymnasium import spaces
 from api_test import api_test
 
-# Reinforcement learning model torch
+from gymnasium import spaces
+import gymnasium
+from gymnasium.envs.registration import register
 
+# Reinforcement learning model torch
 from ray.tune.registry import register_env
 from ray.rllib.env import PettingZooEnv
 import ray
 from ray import air 
 from ray import tune
 from ray.rllib.algorithms import ppo
+from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.policy.policy import PolicySpec
+
 
 class LogisticsServiceModel:
     def __init__(self, L_s, X, L_e=10, phi=0.05, alpha=0.5, beta=0.7, gamma=0.5, c=0.5, f=1):
@@ -192,7 +196,7 @@ class CoopetitionEnv(AECEnv):
     
     def __init__(self):
         super(CoopetitionEnv, self).__init__()
-        super().__init__()
+        # super().__init__()
         self.agents = ["e_tailer", "seller", "tplp"]
         self.selector = agent_selector(self.agents)
         self.possible_agents = self.agents[:]
@@ -205,12 +209,12 @@ class CoopetitionEnv(AECEnv):
         self.action_spaces = {
             "e_tailer": spaces.Discrete(2),  # Shape (2,), only first dimension matters
             "seller": spaces.Discrete(2),    # Shape (2,), only first dimension matters
-            "tplp": spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1]), dtype=np.float32)  # L_s and f both continuous
+            "tplp": spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1.0]),shape=(2,), dtype=np.float32)  # L_s and f both continuous
         }
 
         # Observation spaces
         self.observation_spaces = {
-            "e_tailer": spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1.0]), dtype=np.float32),  # Market potential and service level
+            "e_tailer": spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10, 1.0]),shape=(2,), dtype=np.float32),  # Market potential and service level
             "seller": spaces.Box(low=0, high=1,dtype=np.float32),  # First decision (logistics sharing decision)
             "tplp": spaces.Box(low=0, high=1,dtype=np.float32)  # Second decision (whether sharing is active)
         }
@@ -233,8 +237,8 @@ class CoopetitionEnv(AECEnv):
         
         """Return the observation for the current agent."""
         if agent == "e_tailer":
-            # E-tailer sees only market potential (state[0]) and service level (state[1])
-            return np.array([self.state[0], self.state[1]], dtype=np.float32)
+            # E-tailer sees only market potential (state[1]) and service level (state[2])
+            return np.array([self.state[1], self.state[2]], dtype=np.float32)
         elif agent == "seller":
             # Seller sees only the first decision (whether logistics sharing is agreed upon)
             return np.array([self.state[3]], dtype=np.float32)
@@ -264,8 +268,8 @@ class CoopetitionEnv(AECEnv):
         self.agent_selection = self.possible_agents[0]
         self.dones = {agent: False for agent in self.agents}
         self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
-        self.infos = {agent: {} for agent in self.agents}
-        return {agent: self.state.copy() for agent in self.agents}
+        self.infos = {agent: {} for agent in self.agents}   
+        return
 
     def step(self, action):
         self._clear_rewards()
@@ -294,16 +298,10 @@ class CoopetitionEnv(AECEnv):
                 self.state[1], self.state[2] = action  # Update L_s and f
 
         # Calculate rewards based on the profit functions
-        self.rewards[agent] = self.calculate_profit(agent)
+        self.rewards[agent] = self.calculate_profit(agent)  
         
         self._accumulate_rewards()
         
-        # Check if the episode is done (define your own termination conditions)
-        self.dones = {agent: False for agent in self.agents}  # Modify as needed
-
-        # Set info dictionary (if needed)
-        self.infos = {agent: {} for agent in self.agents}
-
         # self._cumulative_rewards[agent] = 0
         self.agent_selection = self.selector.next()
 
@@ -361,45 +359,53 @@ class CoopetitionEnv(AECEnv):
 
 #     print(env.state)  # Or handle the observations and rewards
 
+
+
 def env_creator(env_config):
     return PettingZooEnv(CoopetitionEnv())
 
-register_env("coopetition-v1", env_creator)
+# Register your environment with Ray
+register_env("coopetition_env", env_creator)
 
-# Define the config with multi-agent setup
+config = PPOConfig() \
+    .environment(env="coopetition_env", env_config={}) \
+    .framework("torch") \
+    .rollouts(num_rollout_workers=1) \
+    .training(model={"use_lstm": False})  # Optional: Customize model configuration
 
-config = (
-    ppo.PPOConfig()
-    .api_stack(
-        enable_rl_module_and_learner=True,
-        enable_env_runner_and_connector_v2=True,
-    )
-    .environment(env="coopetition-v1")
-    .multi_agent(
-        policies={
-            "e_tailer_policy": PolicySpec(
-                observation_space=spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1], dtype=np.float32)),
-                action_space=spaces.Discrete(2),
-            ),
-            "seller_policy": PolicySpec(
-                observation_space=spaces.Box(low=0, high=1,dtype=np.float32),
-                action_space=spaces.Discrete(2),
-            ),
-            "tplp_policy": PolicySpec(
-                observation_space=spaces.Box(low=0, high=1,dtype=np.float32),
-                action_space=spaces.Box(low=np.array([0.0, 0.5]), high=np.array([10.0, 1])),
-            ),
-        },
-        policy_mapping_fn=lambda agent_id, *args, **kwargs: agent_id + "_policy",
-    )
-    .training(
-        lr=0.001,
-        clip_param=0.2,
-    )
+# Customize multi-agent setup (if needed)
+config.multi_agent(
+    policies={
+        "e_tailer": PolicySpec(),
+        "seller": PolicySpec(),
+        "tplp": PolicySpec(),
+    },
+    policy_mapping_fn=lambda agent_id, *args, **kwargs: agent_id
 )
+# Build the PPO algorithm
+algo = config.build()
 
-tune.Tuner(
-    "PPO",
-    run_config=air.RunConfig(stop={"training_iteration": 5}),
-    param_space=config,
-).fit()
+for i in range(10):  # Run for 1000 iterations
+    result = algo.train()
+    print(result)
+    print(f"Iteration: {i}, result keys: {result.keys()}")
+    
+    # Save checkpoint every 100 iterations
+    if i % 1 == 0:
+        checkpoint = algo.save()
+        print(f"Checkpoint saved at: {checkpoint}")
+
+
+algo.restore(checkpoint)
+
+# Evaluate the trained model
+env = env_creator({})
+obs = env.reset()
+
+done = {agent: False for agent in env.agents}
+while not all(done.values()):
+    for agent in env.agent_iter():
+        if not done[agent]:
+            action = algo.compute_single_action(obs[agent], policy_id=agent)
+            obs, reward, done, _ = env.step(action)
+        env.render()  # Optional: Visualize the environment
