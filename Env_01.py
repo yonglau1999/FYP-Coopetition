@@ -277,7 +277,7 @@ class CoopetitionEnv(AECEnv):
         self._clear_rewards()
         agent = self.agent_selection
         self._cumulative_rewards[agent] = 0
-        self.counter += 1
+        self.counter = 1
         # print(f"Current Agent: {agent}")
         
         if agent == "e_tailer":
@@ -297,7 +297,7 @@ class CoopetitionEnv(AECEnv):
         # TPLP adjusts service level and price
         elif agent == "tplp":
             # Action determines L_s and f for TPLP
-            if self.state[4] == 0:
+            if self.state[4] == 1:
                 self.state[1], self.state[2] = action  # Update L_s and f
 
         # Calculate rewards based on the profit functions
@@ -306,18 +306,18 @@ class CoopetitionEnv(AECEnv):
         self._accumulate_rewards()
 
         self.dones[agent] = self.check_done_condition(agent)
-
+        self.counter = 0
         # self._cumulative_rewards[agent] = 0
         self.agent_selection = self.selector.next()
 
         print(f"Agent: {agent}, Action: {action}, Reward: {self.rewards[agent]}")
-        
+
         # return self.observe(agent), self._cumulative_rewards, False, self.dones, self.infos
 
     def check_done_condition(self, agent):
         """ Define when the agent is 'done'. This can depend on a specific condition, like episode length or state. """
         # Example: check if market potential drops below a threshold
-        if self.state[0] <= 0 or self.counter == 10:  # Assuming state[0] is market potential
+        if self.state[0] <= 0 or self.counter == 1:  # Assuming state[0] is market potential
             return True
         return False  
     
@@ -435,4 +435,4 @@ for agent in underlying_env.agent_iter():
         underlying_env.render()
 
 # Print rewards
-print(f"Final rewards: {rewards}")
+print(f"Final rewards: {underlying_env._cumulative_rewards}")
