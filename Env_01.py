@@ -21,7 +21,7 @@ from ray import tune
 from ray.rllib.algorithms import ppo
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.policy.policy import PolicySpec
-
+import torch
 
 class LogisticsServiceModel:
     def __init__(self, L_s, X, L_e=10, phi=0.05, alpha=0.5, beta=0.7, gamma=0.5, c=0.5, f=1):
@@ -201,6 +201,7 @@ class CoopetitionEnv(AECEnv):
         self.selector = agent_selector(self.agents)
         self.possible_agents = self.agents[:]
         self.agent_selection = self.selector.reset()
+        self.counter = 0
         
         # State: [market_potential, L_s, f, 0 -noshare, 1- share x 2]
         self.state = np.array([10.0, 0.5, 1, 0, 0], dtype=np.float32)  # Initial state values
@@ -269,12 +270,14 @@ class CoopetitionEnv(AECEnv):
         self.dones = {agent: False for agent in self.agents}
         self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}   
+        self.counter = 0
         return
 
     def step(self, action):
         self._clear_rewards()
         agent = self.agent_selection
         self._cumulative_rewards[agent] = 0
+        self.counter += 1
         # print(f"Current Agent: {agent}")
         
         if agent == "e_tailer":
@@ -301,11 +304,22 @@ class CoopetitionEnv(AECEnv):
         self.rewards[agent] = self.calculate_profit(agent)  
         
         self._accumulate_rewards()
-        
+
+        self.dones[agent] = self.check_done_condition(agent)
+
         # self._cumulative_rewards[agent] = 0
         self.agent_selection = self.selector.next()
 
+        print(f"Agent: {agent}, Action: {action}, Reward: {self.rewards[agent]}")
+        
         # return self.observe(agent), self._cumulative_rewards, False, self.dones, self.infos
+
+    def check_done_condition(self, agent):
+        """ Define when the agent is 'done'. This can depend on a specific condition, like episode length or state. """
+        # Example: check if market potential drops below a threshold
+        if self.state[0] <= 0 or self.counter == 10:  # Assuming state[0] is market potential
+            return True
+        return False  
     
     def calculate_profit(self, agent):
         theta = self.state[0]  # Market potential
@@ -339,6 +353,10 @@ class CoopetitionEnv(AECEnv):
                 profit = f * D_2 - c_2 * D_2
             else:
                 profit = 0
+
+        if np.isnan(profit):
+            print(f"Warning: Profit for agent {agent} is NaN")
+
         return profit
 
 
@@ -385,10 +403,8 @@ config.multi_agent(
 # Build the PPO algorithm
 algo = config.build()
 
-for i in range(10):  # Run for 1000 iterations
+for i in range(2):  # Run for 1000 iterations
     result = algo.train()
-    print(result)
-    print(f"Iteration: {i}, result keys: {result.keys()}")
     
     # Save checkpoint every 100 iterations
     if i % 1 == 0:
@@ -400,12 +416,23 @@ algo.restore(checkpoint)
 
 # Evaluate the trained model
 env = env_creator({})
-obs = env.reset()
+underlying_env = env.env
 
-done = {agent: False for agent in env.agents}
-while not all(done.values()):
-    for agent in env.agent_iter():
-        if not done[agent]:
-            action = algo.compute_single_action(obs[agent], policy_id=agent)
-            obs, reward, done, _ = env.step(action)
-        env.render()  # Optional: Visualize the environment
+# The PettingZoo-style agent iteration
+for agent in underlying_env.agent_iter():
+    obs = underlying_env.observe(agent)
+
+    if not underlying_env.dones[agent]:  # Use the environment's dones
+        action = algo.compute_single_action(obs, policy_id=agent)
+        if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
+            action = np.array(action)
+        elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
+            action = int(action)
+
+        underlying_env.step(action)  # Perform the step
+
+        # No need to update done and reward outside; handled inside environment
+        underlying_env.render()
+
+# Print rewards
+print(f"Final rewards: {rewards}")
