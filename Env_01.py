@@ -233,6 +233,13 @@ class CoopetitionEnv(AECEnv):
     @property
     def max_num_agents(self) -> int:
         return int(len(self.possible_agents))
+    # @property
+    # def observation_space(self):
+    #     return self.observation_spaces
+
+    # @property
+    # def action_space(self):
+    #     return self.action_spaces
     
     def observe(self, agent):
         
@@ -269,6 +276,7 @@ class CoopetitionEnv(AECEnv):
         self.agent_selection = self.possible_agents[0]
         self.dones = {agent: False for agent in self.agents}
         self._cumulative_rewards = {agent: 0.0 for agent in self.agents}
+        self.agent_selection = self.selector.reset()
         self.infos = {agent: {} for agent in self.agents}   
         self.counter = 0
         return
@@ -297,8 +305,8 @@ class CoopetitionEnv(AECEnv):
         # TPLP adjusts service level and price
         elif agent == "tplp":
             # Action determines L_s and f for TPLP
-            if self.state[4] == 1:
-                self.state[1], self.state[2] = action  # Update L_s and f
+            # if self.state[4] == 1:
+            self.state[1], self.state[2] = action  # Update L_s and f
 
         # Calculate rewards based on the profit functions
         self.rewards[agent] = self.calculate_profit(agent)  
@@ -310,7 +318,7 @@ class CoopetitionEnv(AECEnv):
         # self._cumulative_rewards[agent] = 0
         self.agent_selection = self.selector.next()
 
-        print(f"Agent: {agent}, Action: {action}, Reward: {self.rewards[agent]}")
+        # print(f"Agent: {agent}, Action: {action}, Reward: {self.rewards[agent]}")
 
         # return self.observe(agent), self._cumulative_rewards, False, self.dones, self.infos
 
@@ -347,7 +355,7 @@ class CoopetitionEnv(AECEnv):
         elif agent == "tplp":
 
             if sharing_status == 0:
-                # Use the profit function for TPLP based on the D2 formula
+                # Use the profit function for TPLP based on the D2 formula (Demand of goods from seller)
                 c_2 = 0.5  # TPLP's logistics cost
                 D_2 = self.model.D_seller_no_sharing(theta)
                 profit = f * D_2 - c_2 * D_2
@@ -362,6 +370,11 @@ class CoopetitionEnv(AECEnv):
 
     def render(self, mode="human"):
         print(f"Current state: {self.state}")
+
+    # def agent_iter(self):
+    #     while not all(self.dones.values()):
+    #         yield self.agent_selection
+    #         self.agent_selection = self.selector.next()
 
     def close(self):
         pass
@@ -379,6 +392,8 @@ class CoopetitionEnv(AECEnv):
 
 
 
+# plot_profit_regions()
+
 def env_creator(env_config):
     return PettingZooEnv(CoopetitionEnv())
 
@@ -389,7 +404,7 @@ config = PPOConfig() \
     .environment(env="coopetition_env", env_config={}) \
     .framework("torch") \
     .rollouts(num_rollout_workers=1) \
-    .training(model={"use_lstm": False})  # Optional: Customize model configuration
+    .training(model={"use_lstm": False})  
 
 # Customize multi-agent setup (if needed)
 config.multi_agent(
@@ -403,13 +418,53 @@ config.multi_agent(
 # Build the PPO algorithm
 algo = config.build()
 
-for i in range(2):  # Run for 1000 iterations
+reward_sums = []
+
+for i in range(10):  # Run for x iterations
+    print(f'Currently at iteration {i}')
     result = algo.train()
     
-    # Save checkpoint every 100 iterations
+    # Save checkpoint every iteration
     if i % 1 == 0:
         checkpoint = algo.save()
-        print(f"Checkpoint saved at: {checkpoint}")
+        # print(f"Checkpoint saved at: {checkpoint}")
+
+    # Evaluate the trained model within the training loop to see actions and rewards
+    env = env_creator({})
+    underlying_env = env.env
+    underlying_env.reset()
+
+    # PettingZoo-style agent iteration
+    while not all(underlying_env.dones.values()):
+        for agent in underlying_env.agents:
+
+            print(f"Current agent: {agent}")
+            obs = underlying_env.observe(agent)
+            action = algo.compute_single_action(obs, policy_id=agent)
+            if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
+                action = np.array(action)
+            elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
+                action = int(action)
+
+            underlying_env.step(action)  # Perform the step
+
+            # Print the action taken by the agent
+            print(f"Agent {agent} took action: {action}")
+
+            underlying_env.render()
+
+            # Print the done status of each agent
+            print(f"Dones status: {underlying_env.dones}")
+
+        # Check if the loop exits
+        print("Exited the agent iteration loop")
+
+    # Calculate and store the sum of rewards across all agents after each iteration
+    reward_sum = sum(underlying_env._cumulative_rewards.values())
+    reward_sums.append(reward_sum)
+    
+    # Print rewards after all agents have taken their steps
+    print(f"Rewards after iteration {i}: {underlying_env._cumulative_rewards}")
 
 
 algo.restore(checkpoint)
@@ -418,11 +473,12 @@ algo.restore(checkpoint)
 env = env_creator({})
 underlying_env = env.env
 
-# The PettingZoo-style agent iteration
-for agent in underlying_env.agent_iter():
-    obs = underlying_env.observe(agent)
+# PettingZoo-style agent iteration
+while not all(underlying_env.dones.values()):
+    for agent in underlying_env.agents:
 
-    if not underlying_env.dones[agent]:  # Use the environment's dones
+        obs = underlying_env.observe(agent)
+
         action = algo.compute_single_action(obs, policy_id=agent)
         if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
             action = np.array(action)
@@ -431,8 +487,14 @@ for agent in underlying_env.agent_iter():
 
         underlying_env.step(action)  # Perform the step
 
-        # No need to update done and reward outside; handled inside environment
         underlying_env.render()
 
 # Print rewards
 print(f"Final rewards: {underlying_env._cumulative_rewards}")
+
+# Plot the rewards across iterations
+plt.plot(range(10), reward_sums)
+plt.xlabel('Iteration')
+plt.ylabel('Sum of Rewards (Profits) Across All Agents')
+plt.title('Sum of Rewards Across Training Iterations')
+plt.show()
