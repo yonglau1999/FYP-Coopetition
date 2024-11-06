@@ -194,9 +194,10 @@ def plot_profit_regions():
 class CoopetitionEnv(AECEnv):
     metadata = {"render.modes": ["human"]}
     
-    def __init__(self):
+    def __init__(self,theta):
         super(CoopetitionEnv, self).__init__()
         # super().__init__()
+        self.theta = theta
         self.agents = ["e_tailer", "seller", "tplp"]
         self.selector = agent_selector(self.agents)
         self.possible_agents = self.agents[:]
@@ -204,7 +205,7 @@ class CoopetitionEnv(AECEnv):
         self.counter = 0
         
         # State: [market_potential, L_s, f, 0 -noshare, 1- share x 2]
-        self.state = np.array([10.0, 0.5, 1, 0, 0], dtype=np.float32)  # Initial state values
+        self.state = np.array([self.theta, 0.5, 1, 0, 0], dtype=np.float32)  # Initial state values
 
         # Action spaces
         self.action_spaces = {
@@ -271,7 +272,7 @@ class CoopetitionEnv(AECEnv):
             self._cumulative_rewards[agent] += reward
     
     def reset(self, seed = None, options = None):
-        self.state = np.array([10.0, 0.5, 1, 0, 0], dtype=np.float32)
+        self.state = np.array([self.theta, 0.5, 1, 0, 0], dtype=np.float32)
         self.agents = self.possible_agents[:]
         self.agent_selection = self.possible_agents[0]
         self.dones = {agent: False for agent in self.agents}
@@ -395,7 +396,8 @@ class CoopetitionEnv(AECEnv):
 # plot_profit_regions()
 
 def env_creator(env_config):
-    return PettingZooEnv(CoopetitionEnv())
+    theta = env_config.get("theta")
+    return PettingZooEnv(CoopetitionEnv(theta))
 
 # Register your environment with Ray
 register_env("coopetition_env", env_creator)
@@ -415,56 +417,60 @@ config.multi_agent(
     },
     policy_mapping_fn=lambda agent_id, *args, **kwargs: agent_id
 )
-# Build the PPO algorithm
-algo = config.build()
 
-reward_sums = []
+reward_sums = {}
+market_potential_values = np.arange(1,5)
 
-for i in range(10):  # Run for x iterations
-    print(f'Currently at iteration {i}')
-    result = algo.train()
-    
-    # Save checkpoint every iteration
-    if i % 1 == 0:
-        checkpoint = algo.save()
-        # print(f"Checkpoint saved at: {checkpoint}")
+for theta in market_potential_values:
+    print(f'Working on theta {theta}')
+    config.environment(env_config={"theta": theta})
+    algo = config.build()
+    reward_sums[theta] = []
+    for i in range(10):  # Run for x iterations
+        print(f'Currently at iteration {i}')
+        result = algo.train()
+        
+        # Save checkpoint every iteration
+        if i % 1 == 0:
+            checkpoint = algo.save()
+            # print(f"Checkpoint saved at: {checkpoint}")
 
-    # Evaluate the trained model within the training loop to see actions and rewards
-    env = env_creator({})
-    underlying_env = env.env
-    underlying_env.reset()
+        # Evaluate the trained model within the training loop to see actions and rewards
+        env = env_creator({"theta": theta})  # Pass theta to env_creator
+        underlying_env = env.env
+        underlying_env.reset()
 
-    # PettingZoo-style agent iteration
-    while not all(underlying_env.dones.values()):
-        for agent in underlying_env.agents:
+        # PettingZoo-style agent iteration
+        while not all(underlying_env.dones.values()):
+            for agent in underlying_env.agents:
+                print(f"Current agent: {agent}")
+                obs = underlying_env.observe(agent)
+                action = algo.compute_single_action(obs, policy_id=agent)
+                if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
+                    action = np.array(action)
+                elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
+                    action = int(action)
 
-            print(f"Current agent: {agent}")
-            obs = underlying_env.observe(agent)
-            action = algo.compute_single_action(obs, policy_id=agent)
-            if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
-                action = np.array(action)
-            elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
-                action = int(action)
+                underlying_env.step(action)  # Perform the step
 
-            underlying_env.step(action)  # Perform the step
+                # Print the action taken by the agent
+                print(f"Agent {agent} took action: {action}")
 
-            # Print the action taken by the agent
-            print(f"Agent {agent} took action: {action}")
+                underlying_env.render()
 
-            underlying_env.render()
+                # Print the done status of each agent
+                print(f"Dones status: {underlying_env.dones}")
 
-            # Print the done status of each agent
-            print(f"Dones status: {underlying_env.dones}")
-
-        # Check if the loop exits
+            # Check if the loop exits
         print("Exited the agent iteration loop")
+        print(f"Rewards after iteration {i}: {underlying_env._cumulative_rewards}")
 
-    # Calculate and store the sum of rewards across all agents after each iteration
-    reward_sum = sum(underlying_env._cumulative_rewards.values())
-    reward_sums.append(reward_sum)
-    
-    # Print rewards after all agents have taken their steps
-    print(f"Rewards after iteration {i}: {underlying_env._cumulative_rewards}")
+            # Calculate and store the sum of rewards across all agents after each iteration
+        reward_sum = sum(underlying_env._cumulative_rewards.values())
+        reward_sums[theta].append(reward_sum)
+
+
+    algo.cleanup()
 
 
 algo.restore(checkpoint)
@@ -473,28 +479,33 @@ algo.restore(checkpoint)
 env = env_creator({})
 underlying_env = env.env
 
-# PettingZoo-style agent iteration
-while not all(underlying_env.dones.values()):
-    for agent in underlying_env.agents:
+# # PettingZoo-style agent iteration
+# while not all(underlying_env.dones.values()):
+#     for agent in underlying_env.agents:
 
-        obs = underlying_env.observe(agent)
+#         obs = underlying_env.observe(agent)
 
-        action = algo.compute_single_action(obs, policy_id=agent)
-        if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
-            action = np.array(action)
-        elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
-            action = int(action)
+#         action = algo.compute_single_action(obs, policy_id=agent)
+#         if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
+#             action = np.array(action)
+#         elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
+#             action = int(action)
 
-        underlying_env.step(action)  # Perform the step
+#         underlying_env.step(action)  # Perform the step
 
-        underlying_env.render()
+#         underlying_env.render()
 
 # Print rewards
 print(f"Final rewards: {underlying_env._cumulative_rewards}")
 
 # Plot the rewards across iterations
-plt.plot(range(10), reward_sums)
+
+plt.figure(figsize=(10, 6))
+for theta, rewards in reward_sums.items():
+    plt.plot(range(len(rewards)), rewards, label=f"Theta = {theta}")
+
 plt.xlabel('Iteration')
 plt.ylabel('Sum of Rewards (Profits) Across All Agents')
-plt.title('Sum of Rewards Across Training Iterations')
+plt.title('Sum of Rewards Across Training Iterations for Different Theta Values')
+plt.legend()
 plt.show()
