@@ -407,9 +407,17 @@ register_env("coopetition_env", env_creator)
 config = PPOConfig() \
     .environment(env="coopetition_env", env_config={}) \
     .framework("torch") \
-    .rollouts(num_rollout_workers=1) \
-    .training(model={"use_lstm": False})  
-
+    .rollouts(num_rollout_workers=6) \
+    .training(
+        model={"use_lstm": False},
+        train_batch_size=8000,
+        gamma=0.99,
+        lr=0.0003,
+        entropy_coeff=0.01,
+        clip_param=0.2,
+        lambda_=0.95,
+        grad_clip=0.5
+    )
 # Customize multi-agent setup (if needed)
 config.multi_agent(
     policies={
@@ -421,19 +429,19 @@ config.multi_agent(
 )
 
 reward_sums = {}
-market_potential_values = np.arange(1,5)
+market_potential_values = np.arange(3,5)
 
 for theta in market_potential_values:
     print(f'Working on theta {theta}')
     config.environment(env_config={"theta": theta})
     algo = config.build()
     reward_sums[theta] = []
-    for i in range(10):  # Run for x iterations
+    for i in range(1000):  # Run for x iterations
         print(f'Currently at iteration {i}')
         result = algo.train()
         
         # Save checkpoint every iteration
-        if i % 1 == 0:
+        if i % 4 == 0:
             checkpoint = algo.save()
             # print(f"Checkpoint saved at: {checkpoint}")
 
