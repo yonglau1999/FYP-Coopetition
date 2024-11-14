@@ -202,7 +202,6 @@ class CoopetitionEnv(AECEnv):
         self.selector = agent_selector(self.agents)
         self.possible_agents = self.agents[:]
         self.agent_selection = self.selector.reset()
-        self.counter = 0
         
         # State: [market_potential, L_s, f, 0 -noshare, 1- share x 2]
         self.state = np.array([self.theta, 0.5, 1, 0, 0], dtype=np.float32)  # Initial state values
@@ -227,12 +226,16 @@ class CoopetitionEnv(AECEnv):
         self.dones = {agent: False for agent in self.agents}
         self.infos = {agent: {} for agent in self.agents}
         self.model = LogisticsServiceModel(L_s=self.state[1], X=self.state[0])
+        self.num_iterations = 5
+        self.agent_iters = {agent: 0 for agent in self.agents}
 
     @property
     def num_agents(self) -> int:
         return int(len(self.agents))
+    
     @property
     def max_num_agents(self) -> int:
+    
         return int(len(self.possible_agents))
     # @property
     # def observation_space(self):
@@ -285,8 +288,6 @@ class CoopetitionEnv(AECEnv):
     def step(self, action):
         self._clear_rewards()
         agent = self.agent_selection
-        self._cumulative_rewards[agent] = 0
-        self.counter = 1
         # print(f"Current Agent: {agent}")
         
         if agent == "e_tailer":
@@ -307,26 +308,27 @@ class CoopetitionEnv(AECEnv):
         elif agent == "tplp":
             # Action determines L_s and f for TPLP
             # if self.state[4] == 1:
-            self.state[1], self.state[2] = action  # Update L_s and f
+            self.state[1], self.state[2] = action  # Update L_s and f regardless of outcome
 
         # Calculate rewards based on the profit functions
         self.rewards[agent] = self.calculate_profit(agent)  
         
+        # print(self.rewards[agent])
+
         self._accumulate_rewards()
 
+        self.agent_iters[agent] +=1
+
         self.dones[agent] = self.check_done_condition(agent)
-        self.counter = 0
-        # self._cumulative_rewards[agent] = 0
+        
         self.agent_selection = self.selector.next()
 
-        # print(f"Agent: {agent}, Action: {action}, Reward: {self.rewards[agent]}")
-
-        # return self.observe(agent), self._cumulative_rewards, False, self.dones, self.infos
+        return self.observe(agent), self._cumulative_rewards, False, self.dones, self.infos
 
     def check_done_condition(self, agent):
         """ Define when the agent is 'done'. This can depend on a specific condition, like episode length or state. """
         # Example: check if market potential drops below a threshold
-        if self.state[0] <= 0 or self.counter == 1:  # Assuming state[0] is market potential
+        if self.state[0] <= 0 or self.agent_iters[agent] == self.num_iterations:
             return True
         return False  
     
@@ -443,35 +445,33 @@ for theta in market_potential_values:
         # PettingZoo-style agent iteration
         while not all(underlying_env.dones.values()):
             for agent in underlying_env.agents:
-                print(f"Current agent: {agent}")
-                obs = underlying_env.observe(agent)
-                action = algo.compute_single_action(obs, policy_id=agent)
-                if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
-                    action = np.array(action)
-                elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
-                    action = int(action)
+                # Check if agent has reached max iterations
+                if underlying_env.agent_iters[agent] < underlying_env.num_iterations:
+                    obs = underlying_env.observe(agent)
+                    action = algo.compute_single_action(obs, policy_id=agent)
+                    
+                    if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
+                        action = np.array(action)
+                    elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
+                        action = int(action)
 
-                underlying_env.step(action)  # Perform the step
+                    # Perform the step and update cumulative rewards
+                    _, rewards, _, _, _ = underlying_env.step(action)
 
-                # Print the action taken by the agent
                 print(f"Agent {agent} took action: {action}")
 
                 underlying_env.render()
 
-                # Print the done status of each agent
-                print(f"Dones status: {underlying_env.dones}")
-
-            # Check if the loop exits
         print("Exited the agent iteration loop")
+
         print(f"Rewards after iteration {i}: {underlying_env._cumulative_rewards}")
-
-            # Calculate and store the sum of rewards across all agents after each iteration
-        reward_sum = sum(underlying_env._cumulative_rewards.values())
-        reward_sums[theta].append(reward_sum)
-
+        
+        reward_sums[theta].append(sum(underlying_env._cumulative_rewards.values()))
+        
+        # Reset the environment, state, and cumulative rewards for the next iteration
+        underlying_env.reset()
 
     algo.cleanup()
-
 
 algo.restore(checkpoint)
 
