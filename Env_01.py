@@ -427,25 +427,24 @@ config.multi_agent(
     },
     policy_mapping_fn=lambda agent_id, *args, **kwargs: agent_id
 )
+market_potential_values = np.arange(3, 4)
+reward_sums = {agent: {theta: [] for theta in market_potential_values} for agent in ["e_tailer", "seller", "tplp"]}
 
-reward_sums = {}
-market_potential_values = np.arange(3,5)
 
 for theta in market_potential_values:
     print(f'Working on theta {theta}')
     config.environment(env_config={"theta": theta})
     algo = config.build()
-    reward_sums[theta] = []
-    for i in range(1000):  # Run for x iterations
+    
+    for i in range(300):  # Run for x iterations
         print(f'Currently at iteration {i}')
         result = algo.train()
         
         # Save checkpoint every iteration
         if i % 4 == 0:
             checkpoint = algo.save()
-            # print(f"Checkpoint saved at: {checkpoint}")
 
-        # Evaluate the trained model within the training loop to see actions and rewards
+        # Evaluate the trained model within the training loop
         env = env_creator({"theta": theta})  # Pass theta to env_creator
         underlying_env = env.env
         underlying_env.reset()
@@ -466,54 +465,27 @@ for theta in market_potential_values:
                     # Perform the step and update cumulative rewards
                     _, rewards, _, _, _ = underlying_env.step(action)
 
-                print(f"Agent {agent} took action: {action}")
+                # Store cumulative rewards for each agent
+                reward_sums[agent][theta].append(underlying_env._cumulative_rewards[agent])
 
                 underlying_env.render()
 
-        print("Exited the agent iteration loop")
-
-        print(f"Rewards after iteration {i}: {underlying_env._cumulative_rewards}")
-        
-        reward_sums[theta].append(sum(underlying_env._cumulative_rewards.values()))
-        
         # Reset the environment, state, and cumulative rewards for the next iteration
         underlying_env.reset()
 
     algo.cleanup()
 
+# Restore the last checkpoint for further evaluation
 algo.restore(checkpoint)
 
-# Evaluate the trained model
-env = env_creator({})
-underlying_env = env.env
-
-# # PettingZoo-style agent iteration
-# while not all(underlying_env.dones.values()):
-#     for agent in underlying_env.agents:
-
-#         obs = underlying_env.observe(agent)
-
-#         action = algo.compute_single_action(obs, policy_id=agent)
-#         if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
-#             action = np.array(action)
-#         elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
-#             action = int(action)
-
-#         underlying_env.step(action)  # Perform the step
-
-#         underlying_env.render()
-
-# Print rewards
-print(f"Final rewards: {underlying_env._cumulative_rewards}")
-
-# Plot the rewards across iterations
-
+# Plot the rewards across iterations for each agent
 plt.figure(figsize=(10, 6))
-for theta, rewards in reward_sums.items():
-    plt.plot(range(len(rewards)), rewards, label=f"Theta = {theta}")
+for agent in reward_sums.keys():
+    for theta, rewards in reward_sums[agent].items():
+        plt.plot(range(len(rewards)), rewards, label=f"{agent.capitalize()} (Theta = {theta})")
 
 plt.xlabel('Iteration')
-plt.ylabel('Sum of Rewards (Profits) Across All Agents')
-plt.title('Sum of Rewards Across Training Iterations for Different Theta Values')
+plt.ylabel('Cumulative Profit')
+plt.title('Cumulative Profit Across Training Iterations for Each Agent')
 plt.legend()
 plt.show()
