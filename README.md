@@ -20,6 +20,6 @@ Introduction of TPLP strategic response to E-tailer and seller sharing logistics
    
 ### Viewing tensorboard for trained model at θ = 4:
 
-1. Open command line and navigate to [PPO Logs](Trained_policies_theta4\PPO_Logs)
+1. Open command line and navigate to [PPO Logs](Trained_policies_theta4/PPO_Logs)
 2. Enter "tensorboard --logdir=."
 3. Click on [link](http://localhost:6006/) to view
