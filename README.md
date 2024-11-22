@@ -5,7 +5,8 @@ Reference paper: ["The strategic analysis of logistics service sharing in an e-c
 
 ## Extension:
 
-Introduction of TPLP strategic response to E-tailer and seller sharing logistics service. Trained using PPO.
+Introduction of TPLP response to E-tailer and Seller logistics service sharing. Trained using Ray's RLLib PPO.
+Game environment is created using PettingZoo's AEC Custom Environment with 3 players in a sequential game.
 
 ### Game set-up:
 <img src="https://github.com/user-attachments/assets/b02d3db8-9587-40b9-9095-d77b1437fb82" alt="image" width="600" height="350">
