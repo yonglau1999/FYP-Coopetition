@@ -104,10 +104,10 @@ class LogisticsServiceModel:
 
 
     def D_seller_sharing(self,theta):
-        return theta - self.p2_sharing(theta) +self.alpha * self.p1_sharing(theta) + self.beta * self.L_s - self.gamma * self.L_e
+        return theta - self.p2_sharing(theta) +self.alpha * self.p1_sharing(theta) + self.beta * self.L_e - self.gamma * self.L_e
     
     def D_seller_no_sharing(self,theta):
-         return theta - self.p2_no_sharing(theta) +self.alpha * self.p1_no_sharing(theta) + self.beta * self.L_e - self.gamma * self.L_e       
+         return theta - self.p2_no_sharing(theta) +self.alpha * self.p1_no_sharing(theta) + self.beta * self.L_s - self.gamma * self.L_e       
 
 # Continue with the plotting logic you previously had
 def plot_profit_regions():
@@ -395,97 +395,97 @@ class CoopetitionEnv(AECEnv):
 
 
 
-# plot_profit_regions()
+plot_profit_regions()
 
-def env_creator(env_config):
-    theta = env_config.get("theta")
-    return PettingZooEnv(CoopetitionEnv(theta))
+# def env_creator(env_config):
+#     theta = env_config.get("theta")
+#     return PettingZooEnv(CoopetitionEnv(theta))
 
-# Register your environment with Ray
-register_env("coopetition_env", env_creator)
+# # Register your environment with Ray
+# register_env("coopetition_env", env_creator)
 
-config = PPOConfig() \
-    .environment(env="coopetition_env", env_config={}) \
-    .framework("torch") \
-    .rollouts(num_rollout_workers=6) \
-    .training(
-        model={"use_lstm": False},
-        train_batch_size=8000,
-        gamma=0.99,
-        lr=0.0003,
-        entropy_coeff=0.01,
-        clip_param=0.2,
-        lambda_=0.95,
-        grad_clip=0.5
-    )
-# Customize multi-agent setup (if needed)
-config.multi_agent(
-    policies={
-        "e_tailer": PolicySpec(),
-        "seller": PolicySpec(),
-        "tplp": PolicySpec(),
-    },
-    policy_mapping_fn=lambda agent_id, *args, **kwargs: agent_id
-)
-market_potential_values = np.arange(3, 4)
-reward_sums = {agent: {theta: [] for theta in market_potential_values} for agent in ["e_tailer", "seller", "tplp"]}
+# config = PPOConfig() \
+#     .environment(env="coopetition_env", env_config={}) \
+#     .framework("torch") \
+#     .rollouts(num_rollout_workers=6) \
+#     .training(
+#         model={"use_lstm": False},
+#         train_batch_size=8000,
+#         gamma=0.99,
+#         lr=0.0003,
+#         entropy_coeff=0.01,
+#         clip_param=0.2,
+#         lambda_=0.95,
+#         grad_clip=0.5
+#     )
+# # Customize multi-agent setup (if needed)
+# config.multi_agent(
+#     policies={
+#         "e_tailer": PolicySpec(),
+#         "seller": PolicySpec(),
+#         "tplp": PolicySpec(),
+#     },
+#     policy_mapping_fn=lambda agent_id, *args, **kwargs: agent_id
+# )
+# market_potential_values = np.arange(3, 4)
+# reward_sums = {agent: {theta: [] for theta in market_potential_values} for agent in ["e_tailer", "seller", "tplp"]}
 
 
-for theta in market_potential_values:
-    print(f'Working on theta {theta}')
-    config.environment(env_config={"theta": theta})
-    algo = config.build()
+# for theta in market_potential_values:
+#     print(f'Working on theta {theta}')
+#     config.environment(env_config={"theta": theta})
+#     algo = config.build()
     
-    for i in range(300):  # Run for x iterations
-        print(f'Currently at iteration {i}')
-        result = algo.train()
+#     for i in range(300):  # Run for x iterations
+#         print(f'Currently at iteration {i}')
+#         result = algo.train()
         
-        # Save checkpoint every iteration
-        if i % 4 == 0:
-            checkpoint = algo.save()
+#         # Save checkpoint every iteration
+#         if i % 4 == 0:
+#             checkpoint = algo.save()
 
-        # Evaluate the trained model within the training loop
-        env = env_creator({"theta": theta})  # Pass theta to env_creator
-        underlying_env = env.env
-        underlying_env.reset()
+#         # Evaluate the trained model within the training loop
+#         env = env_creator({"theta": theta})  # Pass theta to env_creator
+#         underlying_env = env.env
+#         underlying_env.reset()
 
-        # PettingZoo-style agent iteration
-        while not all(underlying_env.dones.values()):
-            for agent in underlying_env.agents:
-                # Check if agent has reached max iterations
-                if underlying_env.agent_iters[agent] < underlying_env.num_iterations:
-                    obs = underlying_env.observe(agent)
-                    action = algo.compute_single_action(obs, policy_id=agent)
+#         # PettingZoo-style agent iteration
+#         while not all(underlying_env.dones.values()):
+#             for agent in underlying_env.agents:
+#                 # Check if agent has reached max iterations
+#                 if underlying_env.agent_iters[agent] < underlying_env.num_iterations:
+#                     obs = underlying_env.observe(agent)
+#                     action = algo.compute_single_action(obs, policy_id=agent)
                     
-                    if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
-                        action = np.array(action)
-                    elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
-                        action = int(action)
+#                     if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
+#                         action = np.array(action)
+#                     elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
+#                         action = int(action)
 
-                    # Perform the step and update cumulative rewards
-                    _, rewards, _, _, _ = underlying_env.step(action)
+#                     # Perform the step and update cumulative rewards
+#                     _, rewards, _, _, _ = underlying_env.step(action)
 
-                # Store cumulative rewards for each agent
-                reward_sums[agent][theta].append(underlying_env._cumulative_rewards[agent])
+#                 # Store cumulative rewards for each agent
+#                 reward_sums[agent][theta].append(underlying_env._cumulative_rewards[agent])
 
-                underlying_env.render()
+#                 underlying_env.render()
 
-        # Reset the environment, state, and cumulative rewards for the next iteration
-        underlying_env.reset()
+#         # Reset the environment, state, and cumulative rewards for the next iteration
+#         underlying_env.reset()
 
-    algo.cleanup()
+#     algo.cleanup()
 
-# Restore the last checkpoint for further evaluation
-algo.restore(checkpoint)
+# # Restore the last checkpoint for further evaluation
+# algo.restore(checkpoint)
 
-# Plot the rewards across iterations for each agent
-plt.figure(figsize=(10, 6))
-for agent in reward_sums.keys():
-    for theta, rewards in reward_sums[agent].items():
-        plt.plot(range(len(rewards)), rewards, label=f"{agent.capitalize()} (Theta = {theta})")
+# # Plot the rewards across iterations for each agent
+# plt.figure(figsize=(10, 6))
+# for agent in reward_sums.keys():
+#     for theta, rewards in reward_sums[agent].items():
+#         plt.plot(range(len(rewards)), rewards, label=f"{agent.capitalize()} (Theta = {theta})")
 
-plt.xlabel('Iteration')
-plt.ylabel('Cumulative Profit')
-plt.title('Cumulative Profit Across Training Iterations for Each Agent')
-plt.legend()
-plt.show()
+# plt.xlabel('Iteration')
+# plt.ylabel('Cumulative Profit')
+# plt.title('Cumulative Profit Across Training Iterations for Each Agent')
+# plt.legend()
+# plt.show()
