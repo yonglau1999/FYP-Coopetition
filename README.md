@@ -5,9 +5,10 @@ Reference paper: ["The strategic analysis of logistics service sharing in an e-c
 
 ## Extension:
 
-Introduction of TPLP response to E-tailer and Seller logistics service sharing. Additionally, E-tailer has capacity constraint. If sharing, unfulfilled shipment goes to TPLP.
-Game environment is created using PettingZoo's AEC Custom Environment with 3 players in a sequential game.
-Optimal policy trained using Reinforcement Learning: [Ray's RLLib PPO](https://docs.ray.io/en/latest/rllib/rllib-algorithms.html#ppo)
+* Introduction of *TPLP response* to E-tailer and Seller logistics service sharing.
+* Additionally, introduced capacity constraint for E-tailer. If sharing-mode, any unfulfilled shipment goes to TPLP.
+* Game environment is created using PettingZoo's AEC Custom Environment with 3 players in a sequential game.
+* Optimal policy trained using Reinforcement Learning: [Ray's RLLib PPO](https://docs.ray.io/en/latest/rllib/rllib-algorithms.html#ppo)
 
 ### Game set-up:
 ![image](https://github.com/user-attachments/assets/bb22962a-324f-426b-864a-a772bf672f3d)
