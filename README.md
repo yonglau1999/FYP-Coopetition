@@ -1,4 +1,5 @@
-# NTU Final Year Project D014 : Enhancing supply chain resilience through game theory modelling and reinforcement learning
+# NTU Final Year Project D014 : 
+## Enhancing supply chain resilience through game theory modelling and reinforcement learning
 Reference paper: ["The strategic analysis of logistics service sharing in an e-commerce platform"](https://www.sciencedirect.com/science/article/abs/pii/S0305048318313628)
 
 
@@ -10,9 +11,15 @@ Introduction of TPLP strategic response to E-tailer and seller sharing logistics
 <img src="https://github.com/user-attachments/assets/b02d3db8-9587-40b9-9095-d77b1437fb82" alt="image" width="600" height="350">
 
 
-[Profit Zones Sharing mode](Profitable%20zone.png)|[Trained Policies for each player when θ = 4](Trained_policies_theta4)
+[Profit Zones Sharing mode](Profitable%20zone.png) | [Trained Policies for each player when θ = 4](Trained_policies_theta4)
 
-## Procedure:
+### Training Procedure:
 
 1. pip install "requirements.txt"
 2. run "PPO_LSM.py"
+   
+### Viewing tensorboard for trained model at θ = 4:
+
+1. Open command line and navigate to [PPO Logs](Trained_policies_theta4\PPO_Logs)
+2. Enter "tensorboard --logdir=."
+3. Click on [link](http://localhost:6006/) to view
