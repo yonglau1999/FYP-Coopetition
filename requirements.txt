@@ -3,4 +3,5 @@ matplotlib
 pettingzoo
 gymnasium
 ray[rllib]
+ray[tune]
 torch

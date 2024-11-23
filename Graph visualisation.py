@@ -62,8 +62,11 @@ def plot_profit_regions(ax,ww):
     # Create the contour plot for regions
     c = ax.contourf(theta_grid, L_s_grid, region, cmap=cmap, levels=[-1, 0, 1, 2], extend='both')
 
+    title = "Profit Regions for E-tailer and Seller (w*)"
+    if ww == False:
+        title = "Profit Regions for E-tailer and Seller (w**)"
     # Set labels and titles
-    ax.set_title("Profit Regions for E-tailer and Seller")
+    ax.set_title(title)
     ax.set_xlabel("Market Potential (Theta)")
     ax.set_ylabel("TPLP Service Level (L_s)")
 

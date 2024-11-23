@@ -10,7 +10,6 @@ from Logistics_Service_Model import LogisticsServiceModel
 
 from pettingzoo.utils import AECEnv
 from pettingzoo.utils import agent_selector
-from pettingzoo.test import api_test
 
 from gymnasium import spaces
 from gymnasium.envs.registration import register
@@ -20,19 +19,16 @@ from torch import nn
 from ray.tune.registry import register_env
 from ray.rllib.env import PettingZooEnv
 from ray import tune
-from ray.rllib.algorithms import ppo
 from ray.rllib.algorithms.ppo import PPOConfig
 from ray.rllib.policy.policy import PolicySpec
 from ray.rllib.models import ModelCatalog
 from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.policy.policy import Policy
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
 
 def randomise_conditions():
-    L_s = np.random.randint(1,10)
     theta = np.random.randint(1,8)
-    return L_s,theta
+    return theta
 
 class CoopetitionEnv(AECEnv):
     metadata = {"render_modes": ["human"], "name": "LogisticsServiceModel"}
@@ -96,6 +92,7 @@ class CoopetitionEnv(AECEnv):
             return np.zeros(self.observation_space.shape, dtype=np.float64)
 
     def reset(self, seed = None, options = None):
+        self.theta = randomise_conditions()
         self.obstate = np.array([self.theta, 0.5, 1, 0, 0], dtype=np.float64)
         self.agents = self.possible_agents[:]
         self.terminate = False
@@ -126,44 +123,29 @@ class CoopetitionEnv(AECEnv):
             return
         action = np.asarray(action)
         agent = self.agent_selection
-
-        print(f"Action received for {agent}: {action}")
-        print(f"Current agent is {agent}")
-        
         if agent == "e_tailer":
             if action == 1:
                 self.obstate[3] = 1
             else:
                 self.obstate[3] = 0
-
         elif agent == "seller":
             if self.obstate[3] == 1 and action == 1:
                 self.obstate[4] = 1
             else:
                 self.obstate[4] = 0
-
         elif agent == "tplp":
             self.obstate[1], self.obstate[2] = action
-
         if self._agent_selector.is_last():
 
             self.model = LogisticsServiceModel(self.obstate[1], self.obstate[0], self.obstate[2])
-
             for agent in self.agents:
                 self.rewards[agent] = self.calculate_profit(agent)
-
             self.num_iterations += 1
-
-
-            print(f"Rewards: {self.rewards}")
-
             for i in self.agents:   
                 self.observations[i] = self.observe(i)
         else:
             self._clear_rewards()
-            
         if self._agent_selector.is_last():
-
             self.truncate = self.num_iterations >= self.max_iterations
             self.terminate = self.num_iterations >= self.max_iterations
             self.terminations = dict(
@@ -175,17 +157,6 @@ class CoopetitionEnv(AECEnv):
         self.agent_selection = self._agent_selector.next()
         self._cumulative_rewards[agent] = 0
         self._accumulate_rewards()
-        
-        print(f"Cumulative rewards: {self._cumulative_rewards}")
-
-       
-
-    # def check_done_condition(self, agent):
-    #     """ Define when the agent is 'done'. This can depend on a specific condition, like episode length or obstate. """
-    #     # Example: check if market potential drops below a threshold
-    #     if self.obstate[0] <= 0 or self.agent_iters[agent] == self.num_iterations:
-    #         return True
-    #     return False  
     
     def calculate_profit(self, agent):
         profit_et_no_sharing = self.model.profit_nosharing_etailer() 
@@ -236,18 +207,10 @@ class CoopetitionEnv(AECEnv):
     def render(self, mode="human"):
         print(f"Current obstate: {self.obstate}")
 
-    # def agent_iter(self):
-    #     while not all(self.dones.values()):
-    #         yield self.agent_selection
-    #         self.agent_selection = self.selector.next()
 
     def close(self):
         return
 
-# Can change theta here
-def env_creator(args):
-    env = CoopetitionEnv(theta=4)
-    return env
 
 class CustomCallbacks(DefaultCallbacks):
     def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
@@ -281,6 +244,10 @@ class CNNModelV2(TorchModelV2, nn.Module):
     def value_function(self):
         return self._value_out.flatten()
     
+# Can change theta here
+def env_creator(args):
+    env = CoopetitionEnv(theta=randomise_conditions())
+    return env
 
 # Register your environment with Ray
 register_env("coopetition_env", lambda config: PettingZooEnv(env_creator(config)))
@@ -322,95 +289,14 @@ config.multi_agent(
     ),
 )
 
-def start_tensorboard(logdir):
-    """Start TensorBoard server and open the browser."""
-    try:
-        # Start TensorBoard in the background
-        subprocess.Popen(
-            ["tensorboard", "--logdir", logdir, "--host", "localhost", "--port", "6006"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        print(f"TensorBoard started at http://localhost:6006")
-        
-        # Open the TensorBoard page in the default web browser
-        webbrowser.open("http://localhost:6006", new=2)  # 'new=2' opens in a new tab
-    except FileNotFoundError:
-        print("TensorBoard is not installed. Please install it to enable visualization.")
 
 # Define the log directory
-logdir = os.path.expanduser("~/ray_results/coopetition_env")        
-
-start_tensorboard(logdir)         
+logdir = os.path.expanduser("~/ray_results/coopetition_env")         
 
 tune.run(
-    "PPO",
-    name="PPO",
-    stop={"timesteps_total": 5000000 if not os.environ.get("CI") else 50000},
-    checkpoint_freq=10,
-    storage_path=logdir,
-    config=config.to_dict(),
+     "PPO", name="PPO", 
+     stop={"timesteps_total": 5000000 if not os.environ.get("CI") else 50000}, 
+     checkpoint_freq=10, 
+     storage_path=logdir, 
+     config=config.to_dict(),
 )
-
-# market_potential_values = np.arange(3, 4)
-# reward_sums = {agent: {theta: [] for theta in market_potential_values} for agent in ["e_tailer", "seller", "tplp"]}
-
-
-# for theta in market_potential_values:
-#     print(f'Working on theta {theta}')
-#     config.environment(env_config={"theta": theta})
-#     algo = config.build()
-#     # Evaluate the trained model after the iteration
-#     env = env_creator({"theta": theta})  # Pass theta to env_creator
-#     underlying_env = env.env
-#     underlying_env.reset()
-
-#     # Run until all agents are done
-#     while not all(underlying_env.dones.values()):
-        
-#         # Get the current agent
-#         agent = underlying_env.agent_selection
-        
-#         # Observation and action
-#         obs = underlying_env.observe(agent)
-#         action = algo.compute_single_action(obs, policy_id=agent)
-#         if agent == "e_tailer" or agent == "seller":
-#             action = 0
-#         print(action)
-#         if isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Box):
-#             action = np.array(action)
-#         elif isinstance(underlying_env.action_spaces[agent], gymnasium.spaces.Discrete):
-#             action = int(action)
-
-#         # Step the environment
-#         _, _, _, _, _ = underlying_env.step(action)
-        
-#         # Train the algorithm at the end of a full iteration
-#         if underlying_env.agent_selection == underlying_env.agents[0]:
-#             print(f"Currently at iteration: {max(underlying_env.agent_iters.values())}")
-            
-#             algo.train()
-#             print(f"Training step completed after {sum(underlying_env.agent_iters.values())} timesteps!")
-#             for ag in underlying_env.agents:
-#                 reward_sums[ag][theta].append(underlying_env.rewards[ag])
-
-#             # Store cumulative rewards for the agent
-        
-
-#     algo.cleanup()
-
-# # # Restore the last checkpoint for further evaluation
-# # algo.restore(checkpoint)
-
-# # Plot the rewards across iterations for each agent
-# plt.figure(figsize=(10, 6))
-# for agent in reward_sums.keys():
-#     for theta, rewards in reward_sums[agent].items():
-#         plt.plot(range(len(rewards)), rewards, label=f"{agent.capitalize()} (Theta = {theta})")
-
-# plt.xlabel('Iteration')
-# plt.ylabel('Cumulative Profit')
-# plt.title('Cumulative Profit Across Training Iterations for Each Agent')
-# plt.legend()
-# plt.show()
-
