@@ -20,6 +20,8 @@ Reference Paper: ["The strategic analysis of logistics service sharing in an e-c
 
 1. pip install "requirements.txt"
 2. run "PPO_LSM.py"
+3. To visualise on TensorBoard, follow instructions from output terminal. For e.g,: View detailed results here: C:/Users/<user>/ray_results/coopetition_env/PPO
+To visualize your results with TensorBoard, run: `tensorboard --logdir C:/Users/<user>/AppData/Local/Temp/ray/session_2024-11-23_11-23-55_095928_17916/artifacts/2024-11-23_11-24-16/PPO/driver_artifacts`
    
 ### Viewing tensorboard for trained model at θ = 4:
 
