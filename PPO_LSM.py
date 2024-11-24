@@ -27,7 +27,7 @@ from ray.rllib.algorithms.callbacks import DefaultCallbacks
 
 
 def randomise_conditions():
-    theta = np.random.randint(1,8)
+    theta = 6
     return theta
 
 class CoopetitionEnv(AECEnv):
@@ -52,7 +52,7 @@ class CoopetitionEnv(AECEnv):
         self.observation_spaces = {
             "e_tailer": spaces.Box(low=np.array([0,0,0.5]), high=np.array([10, 10 ,3]), dtype=np.float64),  # Market potential and service level
             "seller": spaces.Box(low=np.array([0, 0,0.5]), high=np.array([10, 10 ,3]), dtype=np.float64),  # First decision (logistics sharing decision)
-            "tplp": spaces.Box(low=np.array([0,0]), high=np.array([1,1]), dtype=np.float64)  # Second decision (whether sharing is active)
+            "tplp": spaces.Box(low=np.array([0,0]), high=np.array([10,1]), dtype=np.float64)  # Second decision (whether sharing is active)
         }
         
         self.terminations = {agent: False for agent in self.agents}
@@ -83,8 +83,8 @@ class CoopetitionEnv(AECEnv):
             # Seller sees only the first decision (whether logistics sharing is agreed upon)
            return obs
         elif agent == "tplp":
-            # TPLP sees only the first and second decision (whether logistics sharing is active)
-            obs = np.array([self.obstate[3],self.obstate[4]], dtype=np.float64)
+            # TPLP sees only market potential (obstate[0]) and second decision (whether logistics sharing is active)
+            obs = np.array([self.obstate[0],self.obstate[4]], dtype=np.float64)
             assert self.observation_spaces[agent].contains(obs), f"Invalid observation for {agent}: {obs}"
             return obs
         else:
@@ -243,7 +243,8 @@ class CNNModelV2(TorchModelV2, nn.Module):
 
     def value_function(self):
         return self._value_out.flatten()
-    
+
+
 # Can change theta here
 def env_creator(args):
     env = CoopetitionEnv(theta=randomise_conditions())
@@ -257,14 +258,14 @@ ModelCatalog.register_custom_model("CNNModelV2", CNNModelV2)
 config = (
     PPOConfig()
     .environment(env="coopetition_env", clip_actions=True)
-    .rollouts(num_rollout_workers=4, rollout_fragment_length='auto')
+    .rollouts(num_rollout_workers=6, rollout_fragment_length='auto')
     .training(
         train_batch_size=1024,
-        lr=1e-6,
+        lr=1e-7,
         gamma=0.99,
         lambda_=0.9,
         use_gae=True,
-        clip_param=0.4,
+        clip_param=0.2,
         grad_clip=None,
         entropy_coeff=0.1,
         vf_loss_coeff=0.25,

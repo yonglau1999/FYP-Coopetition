@@ -14,7 +14,7 @@ Reference Paper: ["The strategic analysis of logistics service sharing in an e-c
 ![image](https://github.com/user-attachments/assets/bb22962a-324f-426b-864a-a772bf672f3d)
 
 
-[Profit Zones Sharing mode replicated from paper](Profitable%20zone.png) | [Trained Policies for each player when θ = 4](Trained_policies_theta4)
+[Profit Zones Sharing mode replicated from paper](Profitable%20zone.png) 
 
 ### Training Procedure:
 
@@ -22,9 +22,12 @@ Reference Paper: ["The strategic analysis of logistics service sharing in an e-c
 2. run "PPO_LSM.py"
 3. To visualise on TensorBoard, follow instructions from output terminal. For e.g, you might see something like: ` View detailed results here: C:/Users/<user>/ray_results/coopetition_env/PPO
 To visualize your results with TensorBoard, run: tensorboard --logdir C:/Users/<user>/AppData/Local/Temp/ray/session_2024-11-23_11-23-55_095928_17916/artifacts/2024-11-23_11-24-16/PPO/driver_artifacts`
-   
-### Viewing tensorboard for trained model at θ = 4:
 
-1. Open command line and navigate to [PPO Logs](Trained_policies_theta4/PPO_Logs)
+#### Folder of trained policies:
+[Trained Policies](Trained_policies)
+   
+#### Example: Viewing tensorboard for trained model at θ = 6:
+
+1. Open command line and navigate to [θ = 6 PPO Logs](Trained_polices/Theta_6/PPO_Logs)
 2. Enter "tensorboard --logdir=."
 3. Click on [link](http://localhost:6006/) to view
