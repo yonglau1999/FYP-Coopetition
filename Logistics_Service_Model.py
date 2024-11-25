@@ -16,7 +16,7 @@ class LogisticsServiceModel:
         self.gamma = gamma
         self.c = c      # Variable cost of logistics for E-tailer
         self.f = f      # Seller's third-party logistics cost
-        self.max_capacity = 7 # E-tailer's maximum service capacity
+        self.max_capacity = 5 # E-tailer's maximum service capacity
 
     def M1(self):
         return (1 - self.phi) * (self.theta * (2 + self.alpha * (1 + self.phi)) + 2 * self.c +
@@ -123,7 +123,7 @@ class LogisticsServiceModel:
             excess = total_demand - self.max_capacity
         else:
             excess = 0
-        
+            
         return excess
 
     # Profit functions sharing and no sharing
@@ -155,8 +155,11 @@ class LogisticsServiceModel:
     
 
     def profit_sharing_seller(self,ww):
+        if ww == True:
 
-        return max(((1-self.phi)*self.p2_sharing(ww)-self.calc_w(ww))*(self.theta-self.p2_sharing(ww)+self.alpha*self.p1_sharing(ww)+(self.beta-self.gamma)*self.L_e),0)
+            return max(((1-self.phi)*self.p2_sharing(ww)-self.calc_w(ww))*(self.theta-self.p2_sharing(ww)+self.alpha*self.p1_sharing(ww)+(self.beta-self.gamma)*self.L_e),0)
+        else: # If w=wstarwstar, add 1e-2 to profits to incentivize RL to pick sharing mode instead
+            return max(((1-self.phi)*self.p2_sharing(ww)-self.calc_w(ww))*(self.theta-self.p2_sharing(ww)+self.alpha*self.p1_sharing(ww)+(self.beta-self.gamma)*self.L_e)+1e-2,0)
     
     def profit_sharing_tplp(self, ww):
         a,b,c = 0.01,-0.12,0.1

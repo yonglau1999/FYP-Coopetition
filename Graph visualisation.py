@@ -9,8 +9,8 @@ from Logistics_Service_Model import LogisticsServiceModel
 # Plot profit regions
 
 def plot_profit_regions(ax,ww):
-    theta_values = np.linspace(0, 6, 100)  # Define a range of market potential (theta)
-    L_s_values = np.linspace(0, 9, 100)    # Define a range of service levels for TPLP (L_s)
+    theta_values = np.linspace(0, 8, 100)  # Define a range of market potential (theta)
+    L_s_values = np.linspace(0, 10, 100)    # Define a range of service levels for TPLP (L_s)
 
     # Create meshgrid to vectorize the loop
     theta_grid, L_s_grid = np.meshgrid(theta_values, L_s_values)
@@ -42,6 +42,12 @@ def plot_profit_regions(ax,ww):
         # Calculate profit differences directly in the loop
         profit_diff_et.flat[idx] = profit_et_sharing - profit_et_no_sharing
         profit_diff_seller.flat[idx] = profit_seller_sharing - profit_seller_no_sharing
+        if abs(theta - 5) < 1e-1 and abs(L_s - 10) < 1e-1:
+            print("Exact Profits at theta=5, L_s=10:")
+            print(f"E-tailer No-Sharing Profit: {profit_et_no_sharing}")
+            print(f"E-tailer Sharing Profit: {profit_et_sharing}")
+            print(f"Seller No-Sharing Profit: {profit_seller_no_sharing}")
+            print(f"Seller Sharing Profit: {profit_seller_sharing}")
 
     # Reshape the arrays back to grid shape
     profit_diff_et = profit_diff_et.reshape(theta_grid.shape)
@@ -88,8 +94,8 @@ def plot_profit_regions(ax,ww):
 
     # Add a color bar
     plt.colorbar(c, ax=ax, ticks=[-1, 1, 2], format='%d')
-    print(model.calc_w(ww))
-    print(profit_diff_seller.min())
+    # print(model.calc_w(ww))
+    # print(profit_diff_seller.min())
 
 fig,ax=plt.subplots(2)
 

@@ -160,9 +160,9 @@ class CoopetitionEnv(AECEnv):
     
     def calculate_profit(self, agent):
         profit_et_no_sharing = self.model.profit_nosharing_etailer() 
-        profit_et_sharing = self.model.profit_sharing_etailer(False)
+        profit_et_sharing = self.model.profit_sharing_etailer(True)
         profit_seller_no_sharing = self.model.profit_nosharing_seller()
-        profit_seller_sharing = self.model.profit_sharing_seller(False)
+        profit_seller_sharing = self.model.profit_sharing_seller(True)
 
         # Calculate profit differences directly in the loop
         profit_diff_et = profit_et_sharing - profit_et_no_sharing
@@ -256,12 +256,12 @@ ModelCatalog.register_custom_model("CNNModelV2", CNNModelV2)
 
 
 config = (
-    PPOConfig()
+    PPOConfig() 
     .environment(env="coopetition_env", clip_actions=True)
     .rollouts(num_rollout_workers=6, rollout_fragment_length='auto')
     .training(
         train_batch_size=1024,
-        lr=1e-7,
+        lr=1e-6,
         gamma=0.99,
         lambda_=0.9,
         use_gae=True,
@@ -292,7 +292,7 @@ config.multi_agent(
 
 
 # Define the log directory
-logdir = os.path.expanduser("~/ray_results/coopetition_env")         
+logdir = "C:\Users\lauyo\Desktop\Y5S1\FYP Coopetition\E-commerce"
 
 tune.run(
      "PPO", name="PPO", 
