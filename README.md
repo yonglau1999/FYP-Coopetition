@@ -24,8 +24,8 @@ To visualize your results with TensorBoard, run: tensorboard --logdir C:/Users/<
 #### Folder of trained policies:
 [Trained Policies](PPO)
    
-#### Example: Viewing tensorboard for trained model at θ = 6:
+#### Example: Viewing tensorboard for trained model at θ = 6 (E-tailer capacity constrained):
 
-1. Open command line and navigate to [θ = 6 PPO Logs](Trained_policies/Theta_6/PPO_Logs)
+1. Open command line and navigate to [θ = 6 PPO](PPO/Theta_6_1)
 2. Enter "tensorboard --logdir=."
 3. Click on link given to view
