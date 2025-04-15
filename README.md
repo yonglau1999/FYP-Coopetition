@@ -30,4 +30,4 @@ To visualize your results with TensorBoard, run: tensorboard --logdir C:/Users/<
 
 1. Open command line and navigate to [θ = 6 PPO Logs](Trained_policies/Theta_6/PPO_Logs)
 2. Enter "tensorboard --logdir=."
-3. Click on [link](http://localhost:6006/) to view
+3. Click on link given to view

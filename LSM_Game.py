@@ -3,11 +3,12 @@ import numpy as np
 from ray.rllib.policy.policy import Policy
 from Logistics_Service_Model import LogisticsServiceModel
 from gymnasium import spaces
+import matplotlib.pyplot as plt
+from StackelBerg import stackelberg_game   
 
 # Load trained policies
-e_tailer_policy = Policy.from_checkpoint("Trained_policies\\Theta_5\\e_tailer_policy")
-seller_policy = Policy.from_checkpoint("Trained_policies\\Theta_5\\seller_policy")
-tplp_policy = Policy.from_checkpoint("Trained_policies\\Theta_5\\tplp_policy")
+
+tplp_policy = Policy.from_checkpoint("PPO\\Theta_5_2_1\\checkpoint_000243\\policies\\tplp_policy")
 
 
 # Initialize Pygame
@@ -50,27 +51,26 @@ class HumanInTheLoopEnv:
         return self.state
     
     def observe(self, agent):
-        if agent == "e_tailer":
-            return np.array([self.state[0], self.state[1], self.state[2]], dtype=np.float64)
-        elif agent == "seller":
-            return np.array([self.state[0], self.state[1], self.state[2]], dtype=np.float64)
-        elif agent == "tplp":
-            return np.array([self.state[0], self.state[4]], dtype=np.float64)
+        if agent == "tplp":
+            obs = np.array([self.obstate[0],self.obstate[4]], dtype=np.float64)
+
+            return obs
 
     def step(self, tplp_action):
-
-        e_tailer_action = e_tailer_policy.compute_single_action(self.observe("e_tailer"),clip_actions=True)[0]
-        seller_action = seller_policy.compute_single_action(self.observe("seller"),clip_actions=True)[0]
-        self.state[3] = e_tailer_action
-        self.state[4] = seller_action if self.state[3] == 1 else 0
+        
         self.state[1] = tplp_action["L_s"]
         self.state[2] = tplp_action["f"]
+        e_tailer_action,seller_action = stackelberg_game(self.state[1],self.state[0],self.state[2])
+        if e_tailer_action and seller_action == 1:
+            self.state[4] = 1
+        else:
+            self.state[4] = 0
+
         self.model = LogisticsServiceModel(self.state[1], self.state[0], self.state[2])
         self.rewards = self.calculate_rewards()
-        print(e_tailer_action,seller_action)
         for agent in self.agents:
             self.cumulative_rewards[agent] += self.rewards[agent]
-
+        print(self.state[4])
         return self.state, self.rewards
 
     def calculate_rewards(self):
@@ -84,31 +84,67 @@ class HumanInTheLoopEnv:
         }
 
     def calculate_profit(self, agent):
-        profit_et_no_sharing = self.model.profit_nosharing_etailer()
-        profit_et_sharing = self.model.profit_sharing_etailer(True) # Assume both sharing first, price = wstar
+        profit_et_no_sharing = self.model.profit_nosharing_etailer() 
+        profit_et_sharing = self.model.profit_sharing_etailer(True)
         profit_seller_no_sharing = self.model.profit_nosharing_seller()
-        profit_seller_sharing = self.model.profit_sharing_seller(True) # Assume both sharing first, price = wstar
+        profit_seller_sharing = self.model.profit_sharing_seller(True)
 
+        # Calculate profit differences directly in the loop
         profit_diff_et = profit_et_sharing - profit_et_no_sharing
         profit_diff_seller = profit_seller_sharing - profit_seller_no_sharing
 
-        ww = (profit_diff_et >= -1e-8) and (profit_diff_seller >= -1e-8)
-        print(ww)
-        theta = self.state[0]
-        L_s = self.state[1]
-        f = self.state[2]
-        sharing_status = self.state[4]
+        self.ww = (profit_diff_et >= -1e-8) and (profit_diff_seller >=-1e-8)
+        theta = self.state[0]  # Market potential
+        L_s = self.state[1]    # Seller's service level
+        f = self.state[2]      # Logistics price
+        sharing_status = self.state[4]  # Logistics sharing status
+    
+        # Reinitialize the model with updated obstate variables
         self.model.L_s = L_s
         self.model.theta = theta
 
+        if agent == "tplp":
+            if sharing_status == 0:
+                profit = self.model.profit_nosharing_tplp()
+            else:
+                profit = self.model.profit_sharing_tplp(self.ww)
+            
+            print(profit)
+    
         if agent == "e_tailer":
-            return self.model.profit_sharing_etailer(ww) if sharing_status == 1 else self.model.profit_nosharing_etailer()
+            if sharing_status == 0:
+                profit = self.model.profit_nosharing_etailer()
+            else:
+                profit = self.model.profit_sharing_etailer(self.ww)
+        
         elif agent == "seller":
-            return self.model.profit_sharing_seller(ww) if sharing_status == 1 else self.model.profit_nosharing_seller()
-        elif agent == "tplp":
-            return self.model.profit_sharing_tplp(ww) if sharing_status == 1 else self.model.profit_nosharing_tplp()
-        return 0
+            if sharing_status == 0:
+                profit = self.model.profit_nosharing_seller()
+            else:
+                profit = self.model.profit_sharing_seller(self.ww)
+            
+        return profit
+        
+    def plot_profit_regions(self,ax, theta_value, sharing_status):
+        # Define range for L_s and f
+        L_s_values = np.linspace(1, 10, 100)
+        f_values = np.linspace(0.5, 3, 100)
 
+        profit_matrix = np.zeros((len(L_s_values), len(f_values)))
+
+        # Compute profits
+        for i, L_s in enumerate(L_s_values):
+            for j, f in enumerate(f_values):
+                model = LogisticsServiceModel(L_s, theta_value, f)
+                ww = (sharing_status == 1)  # sharing_status flag
+                profit_matrix[i, j] = model.profit_sharing_tplp(ww) if ww else model.profit_nosharing_tplp()
+
+        # Plot profit regions
+        c = ax.contourf(f_values, L_s_values, profit_matrix, cmap='viridis', levels=50)
+        ax.set_xlabel("Logistics Price (f)")
+        ax.set_ylabel("Service Level (L_s)")
+        ax.set_title(f"TPLP Profit Regions - {'Sharing' if sharing_status == 1 else 'No Sharing'}")
+        plt.colorbar(c, ax=ax, label="Profit")
 
 class Machine:
     def __init__(self, theta=theta_init):
@@ -140,22 +176,23 @@ class Machine:
 
     def step(self):
 
-        e_tailer_action = e_tailer_policy.compute_single_action(self.observe("e_tailer"),clip_actions=True,explore=False)[0]
-        seller_action = seller_policy.compute_single_action(self.observe("seller"),clip_actions=True,explore=False)[0]
-        self.state[3] = e_tailer_action
-        self.state[4] = seller_action if self.state[3] == 1 else 0
         tplp_action = tplp_policy.compute_single_action(self.observe("tplp"),clip_actions=True,explore=False)[0]
         tplp_action = self.action_spaces["tplp"].low + (self.action_spaces["tplp"].high - self.action_spaces["tplp"].low) * ((np.tanh(tplp_action) + 1) / 2)
         print(tplp_action)
         self.state[1] = tplp_action[0]
         self.state[2] = tplp_action[1]
+        
+        e_tailer_action,seller_action = stackelberg_game(self.state[1],self.state[0],self.state[2])
+        if e_tailer_action and seller_action == 1:
+            self.state[4] = 1
+        else:
+            self.state[4] = 0
         self.model = LogisticsServiceModel(self.state[1], self.state[0], self.state[2])
-        print(tplp_action)
         self.rewards = self.calculate_rewards()
 
         for agent in self.agents:
             self.cumulative_rewards[agent] += self.rewards[agent]
-
+        print(self.state[4])
         return self.state, self.rewards
 
     def calculate_rewards(self):
@@ -169,32 +206,46 @@ class Machine:
         }
 
     def calculate_profit(self, agent):
-        profit_et_no_sharing = self.model.profit_nosharing_etailer()
-        profit_et_sharing = self.model.profit_sharing_etailer(False)
+        profit_et_no_sharing = self.model.profit_nosharing_etailer() 
+        profit_et_sharing = self.model.profit_sharing_etailer(True)
         profit_seller_no_sharing = self.model.profit_nosharing_seller()
-        profit_seller_sharing = self.model.profit_sharing_seller(False)
+        profit_seller_sharing = self.model.profit_sharing_seller(True)
 
+        # Calculate profit differences directly in the loop
         profit_diff_et = profit_et_sharing - profit_et_no_sharing
         profit_diff_seller = profit_seller_sharing - profit_seller_no_sharing
 
-        ww = (profit_diff_et >= -1e-8) and (profit_diff_seller >= -1e-8)
-        theta = self.state[0]
-        L_s = self.state[1]
-        f = self.state[2]
-        sharing_status = self.state[4]
+        self.ww = (profit_diff_et >= -1e-8) and (profit_diff_seller >=-1e-8)
+        theta = self.state[0]  # Market potential
+        L_s = self.state[1]    # Seller's service level
+        f = self.state[2]      # Logistics price
+        sharing_status = self.state[4]  # Logistics sharing status
+    
+        # Reinitialize the model with updated obstate variables
         self.model.L_s = L_s
         self.model.theta = theta
 
+        if agent == "tplp":
+            if sharing_status == 0:
+                profit = self.model.profit_nosharing_tplp()
+            else:
+                profit = self.model.profit_sharing_tplp(self.ww)
+
+            print(f"machine:{profit}")
+    
         if agent == "e_tailer":
-            return self.model.profit_sharing_etailer(ww) if sharing_status == 1 else self.model.profit_nosharing_etailer()
+            if sharing_status == 0:
+                profit = self.model.profit_nosharing_etailer()
+            else:
+                profit = self.model.profit_sharing_etailer(self.ww)
         
         elif agent == "seller":
-            return self.model.profit_sharing_seller(ww) if sharing_status == 1 else self.model.profit_nosharing_seller()
-        
-        elif agent == "tplp":
-            return self.model.profit_sharing_tplp(ww) if sharing_status == 1 else self.model.profit_nosharing_tplp()
-        
-        return 0
+            if sharing_status == 0:
+                profit = self.model.profit_nosharing_seller()
+            else:
+                profit = self.model.profit_sharing_seller(self.ww)
+            
+        return profit
     
 # Helper functions
 def draw_text(surface, text, x, y):
@@ -244,14 +295,25 @@ slider_width = 200
 slider_x = 400
 slider_L_s_y = 50
 slider_f_y = 150
-slider_L_s_value = 1
-slider_f_value = 0.1
+slider_L_s_value = 0
+slider_f_value = 0.5
 
 # Button properties
 button_x = 400
 button_y = 500
 button_width = 150
 button_height = 50
+
+input_active_L_s = False
+input_active_f = False
+input_text_L_s = "1.0"
+input_text_f = "0.5"
+input_box_L_s = pygame.Rect(slider_x, slider_L_s_y, 100, 32)
+input_box_f = pygame.Rect(slider_x, slider_f_y, 100, 32)
+color_inactive = pygame.Color('lightskyblue3')
+color_active = pygame.Color('dodgerblue2')
+color_L_s = color_inactive
+color_f = color_inactive
 
 # Main game loop
 running = True
@@ -268,14 +330,19 @@ while running:
     draw_text(screen, f"E-tailer Sharing: {state[3]}", 50, 120)
     draw_text(screen, f"Seller Sharing: {state[4]}", 50, 150)
 
-    # Draw sliders
-    draw_text(screen, "Adjust Service Level (L_s):", slider_x , slider_L_s_y - 20)
-    knob_L_s_x = draw_slider(screen, slider_x, slider_L_s_y, slider_width, 1, 10, 0.5, slider_L_s_value)
-    draw_text(screen, f"L_s Value: {slider_L_s_value:.2f}", slider_x + slider_width + 20, slider_L_s_y - 10)
+    # L_s input box
+    draw_text(screen, "Enter Service Level (L_s):", slider_x, slider_L_s_y - 30)
+    color_L_s = color_active if input_active_L_s else color_inactive
+    pygame.draw.rect(screen, color_L_s, input_box_L_s, 2)
+    txt_surface = font.render(input_text_L_s, True, WHITE)
+    screen.blit(txt_surface, (input_box_L_s.x + 5, input_box_L_s.y + 5))
 
-    draw_text(screen, "Adjust Logistics Price (f):", slider_x, slider_f_y - 20)
-    knob_f_x = draw_slider(screen, slider_x, slider_f_y, slider_width, 0.1, 3, 0.1, slider_f_value)
-    draw_text(screen, f"f Value: {slider_f_value:.2f}", slider_x + slider_width + 20, slider_f_y - 10)
+    # f input box
+    draw_text(screen, "Enter Logistics Price (f):", slider_x, slider_f_y - 30)
+    color_f = color_active if input_active_f else color_inactive
+    pygame.draw.rect(screen, color_f, input_box_f, 2)
+    txt_surface = font.render(input_text_f, True, WHITE)
+    screen.blit(txt_surface, (input_box_f.x + 5, input_box_f.y + 5))
 
     # Draw the submit button
     draw_button(screen, button_x, button_y, button_width, button_height, "Submit")
@@ -299,25 +366,63 @@ while running:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            mouse_x, mouse_y = pygame.mouse.get_pos()
-            if slider_x <= mouse_x <= slider_x + slider_width:
-                if slider_L_s_y - 10 <= mouse_y <= slider_L_s_y + 10:
-                    slider_L_s_value = slider_value(mouse_x, slider_x, slider_width, 1, 10, 0.5)
-                elif slider_f_y - 10 <= mouse_y <= slider_f_y + 10:
-                    slider_f_value = slider_value(mouse_x, slider_x, slider_width, 0.1, 3, 0.1)
+
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if input_box_L_s.collidepoint(event.pos):
+                input_active_L_s = True
+                input_active_f = False
+            elif input_box_f.collidepoint(event.pos):
+                input_active_f = True
+                input_active_L_s = False
+            else:
+                input_active_L_s = False
+                input_active_f = False
+
             # Check if submit button is pressed
-            if button_x <= mouse_x <= button_x + button_width and button_y <= mouse_y <= button_y + button_height:
+            if button_x <= event.pos[0] <= button_x + button_width and button_y <= event.pos[1] <= button_y + button_height:
                 submit_pressed = True
+
+        elif event.type == pygame.KEYDOWN:
+            if input_active_L_s:
+                if event.key == pygame.K_RETURN:
+                    input_active_L_s = False
+                elif event.key == pygame.K_BACKSPACE:
+                    input_text_L_s = input_text_L_s[:-1]
+                else:
+                    input_text_L_s += event.unicode
+            elif input_active_f:
+                if event.key == pygame.K_RETURN:
+                    input_active_f = False
+                elif event.key == pygame.K_BACKSPACE:
+                    input_text_f = input_text_f[:-1]
+                else:
+                    input_text_f += event.unicode
 
     # Only update the environment and increment iterations if the submit button is pressed
     if submit_pressed:
-        tplp_action = {"L_s": slider_L_s_value, "f": slider_f_value}
-        state, rewards = env.step(tplp_action)
-        state_machine, rewards_machine = env_machine.step()
-        iterations += 1
+        try:
+            L_s_val = float(input_text_L_s)
+            f_val = float(input_text_f)
+
+            # Validate inputs
+            if not (0 <= L_s_val <= 10 and 0.5 <= f_val <= 3):
+                print("L_s must be between [0, 10] and f must be between [0.5, 3]")
+                continue
+
+            tplp_action = {"L_s": L_s_val, "f": f_val}
+            state, rewards = env.step(tplp_action)
+            state_machine, rewards_machine = env_machine.step()
+            iterations += 1
+
+            # Plot
+            fig, ax = plt.subplots(1, 2, figsize=(12, 5))
+            env.plot_profit_regions(ax[0], theta_init, state[4])
+            env.plot_profit_regions(ax[1], theta_init, 0)
+            plt.tight_layout()
+            plt.show()
+
+        except ValueError:
+            print("Invalid input. Enter valid numeric values for L_s and f.")
 
     # Update display
     pygame.display.flip()
-
-# pygame.quit()

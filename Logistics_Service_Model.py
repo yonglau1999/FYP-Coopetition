@@ -6,24 +6,26 @@ import os
 
 
 class LogisticsServiceModel:
+
     def __init__(self, L_s,theta,f=1,L_e=10, phi=0.05, alpha=0.5, beta=0.7, gamma=0.5, c=0.5):
         self.L_e = L_e  # E-tailer's logistics service level    
         self.L_s = L_s  # Seller's logistics service level
-        self.phi = phi  # Commission rate
-        self.theta = theta      # Market potential (from normal distribution)
-        self.alpha = alpha
-        self.beta = beta
-        self.gamma = gamma
+        self.phi = phi  # Commission rate charged to seller 
+        self.theta = theta # Market potential 
+        self.alpha = alpha # The sensitivity of player i’s demand to his/her rival’s retail price, 0 < α < 1
+        self.beta = beta # The sensitivity of player i’s demand to his/her own logistics service level, β > 0
+        self.gamma = gamma # The sensitivity of player i’s demand to his/her rival’s logistics service level, γ < β
         self.c = c      # Variable cost of logistics for E-tailer
-        self.f = f      # Seller's third-party logistics cost
-        self.max_capacity = 5 # E-tailer's maximum service capacity
+        self.f = f      # TPLP logistics fee
+        self.max_capacity = 20 # E-tailer's maximum fulfilment capacity
+        self.commission = 0.5 # If E-tailer has unfulfilled demand, he still takes a cut from tplp
 
-    def M1(self):
+    def M1(self): 
         return (1 - self.phi) * (self.theta * (2 + self.alpha * (1 + self.phi)) + 2 * self.c +
                                  self.L_e * (2 * self.beta - self.alpha * self.gamma * (1 + self.phi)) +
                                  self.L_s * (self.alpha * self.beta * (1 + self.phi) - 2 * self.gamma)) + self.alpha * self.f * (1 + self.phi)
 
-    def M2(self):
+    def M2(self): 
         return (1 - self.phi) * (self.theta * (2 + self.alpha) + self.alpha * self.c +
                                  self.L_e * (self.alpha * self.beta - 2 * self.gamma) +
                                  self.L_s * (2 * self.beta - self.alpha * self.gamma)) + 2 * self.f
@@ -111,21 +113,24 @@ class LogisticsServiceModel:
     def D_nosharing_seller(self):
          return self.theta - self.p2_nosharing() +self.alpha * self.p1_nosharing() + self.beta * self.L_s - self.gamma * self.L_e       
     
-    def calc_excess_demand(self, ww): # Unfulfilled capacity
-
-        """Calculate excess demand for TPLP."""
+    def calc_excess_demand(self, ww):
         demand_sharing_etailer = self.D_sharing_etailer(ww)
         demand_sharing_seller = self.D_sharing_seller(ww)
         total_demand = demand_sharing_etailer + demand_sharing_seller
-        
         # Check if the total demand exceeds the maximum capacity
         if total_demand > self.max_capacity:
-            excess = total_demand - self.max_capacity
-        else:
-            excess = 0
-            
-        return excess
+            if demand_sharing_etailer <= self.max_capacity:
+                excess = total_demand-self.max_capacity
+                top_up = demand_sharing_seller - excess
+                for_tplp = max (0,self.D_nosharing_seller() - top_up)
+            else:
+                for_tplp = self.max_capacity - demand_sharing_etailer + self.D_nosharing_seller()
 
+        else:
+            for_tplp = 0
+            
+        return for_tplp
+    
     # Profit functions sharing and no sharing
 
     def profit_nosharing_etailer(self):
@@ -143,30 +148,43 @@ class LogisticsServiceModel:
         return max(((N2**2) / bottom),0)
     
     def profit_nosharing_tplp(self):
-        a,b,c = 0.01,-0.12,0.1
-        cost_per_unit = a * self.L_s**2 + b * self.L_s + c # Convex cost function of service level
+        a = 0.05
+        b = 0.2
+        c = 0.2 
+        cost_per_unit = a * self.L_s + b * self.f + c * self.f**2
         total_volume = self.D_nosharing_seller()
-        return max((self.f-cost_per_unit)*total_volume,0)
+        total_profit = (self.f-cost_per_unit)*total_volume
+        return max(total_profit,0)
 
 
     def profit_sharing_etailer(self,ww):
-        return max((self.p1_sharing(ww)-self.c)*(self.theta-self.p1_sharing(ww)+self.alpha*self.p2_sharing(ww)+(self.beta-self.gamma)*self.L_e) + \
-        (self.phi*self.p2_sharing(ww)+self.calc_w(ww)-self.c)*(self.theta-self.p2_sharing(ww)+self.alpha*self.p1_sharing(ww)+(self.beta-self.gamma)*self.L_e),0)
+        unfulfilled_demand = self.calc_excess_demand(ww)
+        retained_profit = self.commission * unfulfilled_demand * (self.calc_w(ww))  
+        total_profit = (self.p1_sharing(ww)-self.c)*(self.D_sharing_etailer(ww)) + \
+        (self.phi*self.p2_sharing(ww)+self.calc_w(ww)-self.c)*(self.D_sharing_seller(ww)-unfulfilled_demand)+retained_profit
+
+        return max(total_profit,0)
     
 
     def profit_sharing_seller(self,ww):
+        total_profit = ((1-self.phi)*self.p2_sharing(ww)-self.calc_w(ww)) * (self.D_sharing_seller(ww))
         if ww == True:
-
-            return max(((1-self.phi)*self.p2_sharing(ww)-self.calc_w(ww))*(self.theta-self.p2_sharing(ww)+self.alpha*self.p1_sharing(ww)+(self.beta-self.gamma)*self.L_e),0)
+            return max(total_profit,0)
+        
         else: # If w=wstarwstar, add 1e-2 to profits to incentivize RL to pick sharing mode instead
-            return max(((1-self.phi)*self.p2_sharing(ww)-self.calc_w(ww))*(self.theta-self.p2_sharing(ww)+self.alpha*self.p1_sharing(ww)+(self.beta-self.gamma)*self.L_e)+1e-2,0)
-    
+            return max(total_profit+1e-2,0)
+            
     def profit_sharing_tplp(self, ww):
-        a,b,c = 0.01,-0.12,0.1
-        excess_demand = self.calc_excess_demand(ww)
-        cost_per_unit = a * self.L_s**2 + b * self.L_s + c  # Convex cost function of service level
-        return max((self.f - cost_per_unit) * excess_demand,0)
+        a = 0.05
+        b = 0.2
+        c = 0.2 
+        excess_demand = self.calc_excess_demand(ww) 
+        retained_revenue_per_unit = (1-self.commission) * (self.calc_w(ww)) + self.f 
+        cost_per_unit = a * self.L_s + b * self.f + c * self.f**2
+        total_profit = (retained_revenue_per_unit - cost_per_unit) * excess_demand
+        return max(total_profit,0)
 
+    
     def calc_w(self,ww):
         if ww == True:
             result = (
