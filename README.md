@@ -24,15 +24,17 @@ pip install "requirements.txt"
 This provides a guide on how to train the optimal policy for the TPLP given a fixed market potential (θ).
 
 1. Go to `LSM_Game.py`. Determine the market potential, θ, which you want to train at. Set this value here (range from 4-8).
-2. 
+
 ![image](https://github.com/user-attachments/assets/b1ba279f-e197-4199-ac6c-3ee9b412275d)
+
 3. Go to `Logistics_Service_Model.py`. Determine the capacity of the E-tailer. Set this value here under "self.max_capacity" (Value used in project is 5).
-4. 
+
 ![image](https://github.com/user-attachments/assets/dfc6fa75-b0a5-4876-9cd1-94a65110c040)
-5. run "PPO_LSM_new.py"
-6. To visualise on TensorBoard, follow instructions from output terminal. For e.g, you might see something like: ` View detailed results here: C:/Users/<user>/ray_results/coopetition_env/PPO
+
+4. run "PPO_LSM_new.py"
+5. To visualise on TensorBoard, follow instructions from output terminal. For e.g, you might see something like: ` View detailed results here: C:/Users/<user>/ray_results/coopetition_env/PPO
 To visualize your results with TensorBoard, run: tensorboard --logdir C:/Users/<user>/AppData/Local/Temp/ray/session_2024-11-23_11-23-55_095928_17916/artifacts/2024-11-23_11-24-16/PPO/driver_artifacts`
-7. Alternatively, viewing TensorBoard post training. (Example for trained model at θ = 6, E-tailer capacity constrained):
+6. Alternatively, viewing TensorBoard post training. (Example for trained model at θ = 6, E-tailer capacity constrained):
    
    1. Open command line and navigate to [θ = 6 PPO](PPO/Theta_6_1)
    2. Enter "tensorboard --logdir=."
@@ -41,15 +43,17 @@ To visualize your results with TensorBoard, run: tensorboard --logdir C:/Users/<
 ### Policy Testing Procedure (Example for trained model at θ = 6, E-tailer capacity constrained):
 
 1. Go to `LSM_Game.py`. Navigate to the [trained policy directory](PPO/Theta_6_1/checkpoint_000487/policies/tplp_policy). This will be located in the final checkpoint, and copy paste in this line.
-2. 
+   
 ![image](https://github.com/user-attachments/assets/00f0dcef-18c2-4fe0-ac86-ecd8948ba319)
 3. Set the market potential, θ  which the agent is trained at here.
-4. 
+
 ![image](https://github.com/user-attachments/assets/824ffa01-6602-4d0b-91f9-e6075e97f86d)
-5. Run the script. The interface will look like this:
-6. 
+
+4. Run the script. The interface will look like this:
+
 ![image](https://github.com/user-attachments/assets/37c61736-5b54-47c9-b6c1-f134b58d8671)
-7. Input your value of L_s and f and compare the rewards against the trained policy's (machine) rewards.
+
+5. Input your value of L_s and f and compare the rewards against the trained policy's (machine) rewards.
    
 #### Folder of pre-trained policies:
 [Trained Policies](PPO)
