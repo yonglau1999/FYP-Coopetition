@@ -45,7 +45,8 @@ To visualize your results with TensorBoard, run: tensorboard --logdir C:/Users/<
 1. Go to `LSM_Game.py`. Navigate to the [trained policy directory](PPO/Theta_6_1/checkpoint_000487/policies/tplp_policy). This will be located in the final checkpoint, and copy paste in this line.
    
 ![image](https://github.com/user-attachments/assets/00f0dcef-18c2-4fe0-ac86-ecd8948ba319)
-3. Set the market potential, θ  which the agent is trained at here.
+
+3. Set the market potential, θ,  which the agent is trained at, here.
 
 ![image](https://github.com/user-attachments/assets/824ffa01-6602-4d0b-91f9-e6075e97f86d)
 
